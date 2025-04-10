@@ -1,0 +1,8 @@
+graph TD;
+    A["Git Repository"] -->|"Pull"| B["Pull Daemon"]
+    B -->|"Clone/Update"| C["Local Code Storage"]
+    C -->|"Index"| D["Zoekt Indexer"]
+    D -->|"Store"| E["Zoekt Index Files"]
+    E -->|"Query"| F["Zoekt Search API"]
+    F -->|"Provide context"| G["AI Engine"]
+    G -->|"Generate improvements"| H["PR Creator"]
