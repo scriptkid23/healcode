@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  zoekt:
+    build:
+      context: .
+      dockerfile: docker/zoekt.Dockerfile
+    volumes:
+      - ./.zoekt-index:/root/.zoekt
+      - ./example_repo:/repo
+    ports:
+      - "6070:6070"
+    command: zoekt-webserver -listen :6070 -index /root/.zoekt -rpc
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6070"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  indexer:
+    build:
+      context: .
+      dockerfile: docker/python.Dockerfile
+    volumes:
+      - ./.zoekt-index:/root/.zoekt
+      - ./example_repo:/repo
+    depends_on:
+      zoekt:
+        condition: service_healthy
+    command: indexer --repo-path /repo
+    restart: "no"
+
+  search-proxy:
+    build:
+      context: .
+      dockerfile: docker/python.Dockerfile
+    volumes:
+      - ./:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      zoekt:
+        condition: service_healthy
+    command: search-proxy --port 8000 --zoekt-url http://zoekt:6070
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  ai-engine:
+    build:
+      context: .
+      dockerfile: docker/python.Dockerfile
+    volumes:
+      - ./example_repo:/repo
+    depends_on:
+      search-proxy:
+        condition: service_healthy
+    command: ai-engine --repo-path /repo --search-url http://search-proxy:8000
+    restart: "no"
+
+  pr-creator:
+    build:
+      context: .
+      dockerfile: docker/python.Dockerfile
+    volumes:
+      - ./example_repo:/repo
+    depends_on:
+      - ai-engine
+    command: >
+      pr-creator 
+      --repo-path /repo 
+      --branch-name ai-refactoring/none-comparison-fix 
+      --commit-message "Refactor: Replace == None with is None"
+    restart: "no" 
