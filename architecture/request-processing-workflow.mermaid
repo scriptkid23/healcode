@@ -1,0 +1,26 @@
+flowchart TD
+    START([Start]) --> PULL{Pull new code?}
+    PULL -->|Yes| GITPULL["git pull origin main"]
+    PULL -->|No| WAIT["Wait for API request"]
+    GITPULL --> UPDATE["Update Local Storage"]
+    UPDATE --> WAIT
+    
+    WAIT --> REQ["Receive API request"]
+    REQ --> PARSE["Parse request<br/>- Repository<br/>- File<br/>- Function<br/>- Request"]
+    
+    PARSE --> SEARCH["Zoekt Search<br/>Find related code"]
+    SEARCH --> FOUND{Found?}
+    FOUND -->|No| ERROR1["Error: Code not found"]
+    FOUND -->|Yes| AIPROCESS["AI Processing<br/>- Analyze code<br/>- Generate improvements<br/>- Provide explanation"]
+    
+    AIPROCESS --> ESLINT["ESLint --fix<br/>Format code"]
+    ESLINT --> CHECK["Check ESLint errors"]
+    CHECK --> BRANCH["Create new Git branch<br/>git checkout -b feature-branch"]
+    
+    BRANCH --> COMMIT["Commit changes<br/>git add .<br/>git commit -m 'message'"]
+    COMMIT --> PUSH["Push to remote<br/>git push origin feature-branch"]
+    PUSH --> CREATEPR["Create Pull Request<br/>via GitHub API"]
+    
+    CREATEPR --> SUCCESS["Success<br/>Return PR URL"]
+    ERROR1 --> END([End])
+    SUCCESS --> END

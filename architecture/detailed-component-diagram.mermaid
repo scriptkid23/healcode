@@ -1,0 +1,70 @@
+graph TB
+    subgraph "API Layer"
+        REST["REST API Endpoint<br/>/api/improve-code"]
+        AUTH["Authentication<br/>Token Validation"]
+        VALID["Request Validator<br/>Schema Validation"]
+    end
+    
+    subgraph "Core Processing"
+        QUEUE["Request Queue<br/>Redis/Memory"]
+        WORKER["Worker Process<br/>Background Jobs"]
+        CACHE["Cache Layer<br/>Redis Cache"]
+    end
+    
+    subgraph "Code Management"
+        GITM["Git Manager<br/>- Clone/Pull<br/>- Branch Management<br/>- Commit/Push"]
+        FILEM["File Manager<br/>- Read/Write Files<br/>- Directory Structure"]
+        SEARCH["Search Engine<br/>Zoekt Integration"]
+    end
+    
+    subgraph "AI Processing"
+        PROMPT["Prompt Builder<br/>Context Assembly"]
+        AIAPI["AI API Client<br/>OpenAI/CodeLlama"]
+        PARSER["Response Parser<br/>Code Extraction"]
+    end
+    
+    subgraph "Code Quality"
+        ESLINTM["ESLint Manager<br/>- Configuration<br/>- Rule Execution<br/>- Fix Application"]
+        PRETTIER["Prettier<br/>Code Formatting"]
+        LINTER["Code Linter<br/>Quality Checks"]
+    end
+    
+    subgraph "Git Integration"
+        GHAPI["GitHub API Client<br/>PR Management"]
+        WEBHOOK["Webhook Handler<br/>Event Processing"]
+        NOTIFY["Notification Service<br/>Status Updates"]
+    end
+    
+    subgraph "Storage"
+        LOCALFS["Local File System<br/>/codebase directory"]
+        CONFIG["Configuration<br/>.eslintrc, package.json"]
+        LOGS["Logging System<br/>Process Tracking"]
+    end
+    
+    REST --> AUTH
+    AUTH --> VALID
+    VALID --> QUEUE
+    QUEUE --> WORKER
+    
+    WORKER --> GITM
+    WORKER --> SEARCH
+    WORKER --> PROMPT
+    
+    GITM --> LOCALFS
+    SEARCH --> LOCALFS
+    PROMPT --> AIAPI
+    AIAPI --> PARSER
+    
+    PARSER --> ESLINTM
+    ESLINTM --> CONFIG
+    ESLINTM --> PRETTIER
+    
+    PRETTIER --> FILEM
+    FILEM --> LOCALFS
+    FILEM --> GITM
+    
+    GITM --> GHAPI
+    GHAPI --> NOTIFY
+    
+    WORKER --> CACHE
+    WORKER --> LOGS

@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant U as User
+    participant API as API Handler
+    participant Q as Queue
+    participant W as Worker
+    participant Z as Zoekt
+    participant AI as AI Service
+    participant E as ESLint
+    participant G as Git Manager
+    participant GH as GitHub API
+    
+    U->>API: POST /api/improve-code
+    API->>API: Validate request
+    API->>Q: Add to queue
+    API->>U: Request accepted (202)
+    
+    Q->>W: Process job
+    W->>Z: Search code
+    Z->>W: Return code context
+    
+    W->>AI: Send code + request
+    AI->>W: Return improved code
+    
+    W->>E: Format with ESLint
+    E->>W: Return formatted code
+    
+    W->>G: Create new branch
+    W->>G: Commit changes
+    W->>G: Push to remote
+    
+    W->>GH: Create Pull Request
+    GH->>W: PR created
+    
+    W->>U: Notify completion (webhook/polling)

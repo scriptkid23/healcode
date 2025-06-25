@@ -1,0 +1,34 @@
+graph TB
+    subgraph "External Services"
+        GR["Git Repository<br/>(GitHub/GitLab)"]
+        AI["AI Service<br/>(GPT-4/CodeLlama)"]
+    end
+    
+    subgraph "Core System"
+        PD["Pull Daemon<br/>(Auto code pulling)"]
+        LS["Local Storage<br/>(Local code storage)"]
+        API["API Request Handler<br/>(Request processing)"]
+        ZS["Zoekt Search<br/>(Code search)"]
+        AIC["AI Code Improvement<br/>(Code enhancement)"]
+        ESL["ESLint Formatter<br/>(Code formatting)"]
+        PRC["PR Creator<br/>(Pull Request creation)"]
+    end
+    
+    subgraph "User Interface"
+        USER["User Request<br/>(API Call)"]
+        PR["Pull Request<br/>(Result)"]
+    end
+    
+    GR -->|git pull| PD
+    PD -->|store code| LS
+    USER -->|request| API
+    API -->|search| ZS
+    ZS -->|find code| LS
+    ZS -->|code context| AIC
+    AIC -->|query| AI
+    AI -->|improved code| AIC
+    AIC -->|raw code| ESL
+    ESL -->|formatted code| PRC
+    PRC -->|create PR| GR
+    GR -->|PR created| PR
+    PR -->|feedback| USER
