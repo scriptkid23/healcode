@@ -1,35 +1,42 @@
 [tool.poetry]
-name = "ai-refactoring"
-version = "0.1.0"
-description = "AI-powered code refactoring system running entirely locally"
-authors = ["Your Name <your.email@example.com>"]
+name = "git-plugin"
+version = "1.0.0"
+description = "Simplified Git Plugin for basic Git operations"
+authors = ["Git Plugin Team <team@gitplugin.com>"]
 readme = "README.md"
+packages = [{include = "gitplugin"}]
 
 [tool.poetry.dependencies]
-python = "^3.8"
-gitpython = "^3.1.30"
-requests = "^2.28.2"
-fastapi = "^0.95.0"
-uvicorn = "^0.21.1"
-pydantic = "^1.10.7"
-python-dotenv = "^1.0.0"
-typer = "^0.7.0"
-rich = "^13.3.3"
+python = "^3.11"
+fastapi = "^0.104.1"
+uvicorn = {extras = ["standard"], version = "^0.24.0"}
+GitPython = "^3.1.40"
+httpx = "^0.25.2"
+pydantic = "^2.5.0"
+python-json-logger = "^2.0.7"
+requests = "^2.31.0"
 
-[tool.poetry.dev-dependencies]
-pytest = "^7.3.1"
-black = "^23.3.0"
-isort = "^5.12.0"
-mypy = "^1.2.0"
-flake8 = "^6.0.0"
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-asyncio = "^0.21.1"
+black = "^23.11.0"
+flake8 = "^6.1.0"
+mypy = "^1.7.1"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-pull-daemon = "ai_refactoring.pull_daemon:main"
-indexer = "ai_refactoring.indexer:main"
-search-proxy = "ai_refactoring.search_proxy:main"
-ai-engine = "ai_refactoring.ai_engine:main"
-pr-creator = "ai_refactoring.pr_creator:main" 
+git-plugin = "gitplugin.api.main:main"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true 
