@@ -208,3 +208,4 @@ __marimo__/
 
 /credentials/*.json
 /repository/*
+/codebase/*
