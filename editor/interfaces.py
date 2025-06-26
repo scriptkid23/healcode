@@ -16,6 +16,7 @@ class EditOperationType(Enum):
     RANGE = "range"
     PATTERN = "pattern"
     AST = "ast"
+    APPEND = "append"  # New operation type for appending content
 
 
 @dataclass
@@ -34,7 +35,7 @@ class EditRequest:
     """Request model for file editing operations"""
     file_path: str
     operation_type: EditOperationType
-    target: Union[int, range, str]  # line number, range, or pattern
+    target: Union[int, range, str, None]  # line number, range, pattern, or None for append
     content: str
     options: EditOptions = field(default_factory=EditOptions)
     
@@ -43,19 +44,30 @@ class EditRequest:
         if not self.file_path:
             raise ValueError("file_path cannot be empty")
         
-        if not self.content and self.operation_type != EditOperationType.PATTERN:
-            raise ValueError("content cannot be empty for non-pattern operations")
-        
-        # Validate target based on operation type
+        # Special logic for batch edit: target is tuple (line_numbers, new_contents)
         if self.operation_type == EditOperationType.LINE:
-            if not isinstance(self.target, int) or self.target < 1:
-                raise ValueError("Line number must be a positive integer")
+            if isinstance(self.target, tuple):
+                line_numbers, new_contents = self.target
+                if not line_numbers or not new_contents or len(line_numbers) != len(new_contents):
+                    raise ValueError("For batch edit, line_numbers and new_contents must be non-empty and same length")
+            else:
+                if not isinstance(self.target, int) or self.target < 1:
+                    raise ValueError("Line number must be a positive integer")
+                if not self.content:
+                    raise ValueError("content cannot be empty for non-pattern operations")
         elif self.operation_type == EditOperationType.RANGE:
             if not isinstance(self.target, range):
                 raise ValueError("Range target must be a range object")
+            if not self.content:
+                raise ValueError("content cannot be empty for non-pattern operations")
         elif self.operation_type == EditOperationType.PATTERN:
             if not isinstance(self.target, str):
                 raise ValueError("Pattern target must be a string")
+        elif self.operation_type == EditOperationType.APPEND:
+            if self.target is not None:
+                raise ValueError("Append operation should not have a target")
+            if not self.content:
+                raise ValueError("content cannot be empty for append operation")
 
 
 @dataclass

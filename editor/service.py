@@ -153,6 +153,17 @@ class EditorService:
         )
         return await self.edit_file(request)
     
+    async def append_block(self, file_path: str, content: str, options: EditOptions = None) -> EditResult:
+        """Append a block of content to the end of a file"""
+        request = EditRequest(
+            file_path=file_path,
+            operation_type=EditOperationType.APPEND,
+            target=None,
+            content=content,
+            options=options or EditOptions()
+        )
+        return await self.edit_file(request)
+    
     async def rollback(self, rollback_request: RollbackRequest) -> RollbackResult:
         """Rollback a previous operation"""
         operation_id = rollback_request.operation_id
@@ -377,6 +388,18 @@ class EditorService:
     async def cleanup_old_backups(self):
         """Clean up old backup files"""
         await self.backup_manager.cleanup_old_backups()
+
+    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: list, options: EditOptions = None) -> EditResult:
+        """Edit or insert multiple lines at specified line numbers"""
+        from .interfaces import EditRequest, EditOperationType
+        request = EditRequest(
+            file_path=file_path,
+            operation_type=EditOperationType.LINE,
+            target=(line_numbers, new_contents),
+            content="",  # not used
+            options=options or EditOptions()
+        )
+        return await self.strategies[EditOperationType.LINE].edit_lines(request)
 
 
 class BackupManager:

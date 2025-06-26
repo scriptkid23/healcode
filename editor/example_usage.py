@@ -71,19 +71,43 @@ async def demo_basic_editing():
             print(f"   ❌ Error: {result2.error}")
         print()
         
-        # Demo 3: Add a new function at the end of the file
-        print("3. ➕ Adding new function subtract_numbers at the end of demo.py...")
-        with open(demo_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+        # Demo 3: Add a new function at the end of the file using editor
+        print("3. ➕ Adding new function subtract_numbers at the end of demo.py using editor...")
         new_func = '\ndef subtract_numbers(a, b):\n    return a - b  # New subtract function added by editor\n'
-        lines.append(new_func)
-        with open(demo_file, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-        print("   ✅ New function added.")
+        result3 = await editor.append_block(
+            file_path=demo_file,
+            content=new_func
+        )
+        print(f"   ✅ Success: {result3.success}")
+        if result3.error:
+            print(f"   ❌ Error: {result3.error}")
         print()
         
-        # Demo 4: Display file after editing
-        print("4. 📄 File content after editing:")
+        # Demo 4: Insert a new function at line 18 using edit_lines
+        print("4. 📝 Insert new function my_function at line 18 using edit_lines...")
+        func_lines = [
+            "def my_function(x):",
+            "    return x[::-1]",
+            "",
+            "mytxt = my_function(\"I wonder how this text looks like backwards\")",
+            "",
+            "print(mytxt)"
+        ]
+        start_line = 5
+        line_numbers = list(range(start_line, start_line + len(func_lines)))
+        result_func = await editor.edit_lines(
+            file_path=demo_file,
+            line_numbers=line_numbers,
+            new_contents=func_lines
+        )
+        print(f"   ✅ Success: {result_func.success}")
+        print(f"   📊 Lines changed: {result_func.lines_changed}")
+        if result_func.error:
+            print(f"   ❌ Error: {result_func.error}")
+        print()
+        
+        # Demo 5: Display file after editing
+        print("5. 📄 File content after editing:")
         with open(demo_file, 'r', encoding='utf-8') as f:
             modified_content = f.read()
         print(modified_content)
@@ -98,6 +122,25 @@ async def demo_basic_editing():
             print(f"      File: {status['file_path']}")
             print(f"      Type: {status['operation_type']}")
             print(f"      Duration: {status.get('duration_seconds', 0):.3f}s")
+        print()
+        
+        # Demo 3: Batch edit/insert lines using edit_lines
+        print("3. 📝 Batch edit/insert lines 2, 3, 4 using edit_lines...")
+        batch_lines = [2, 3, 4]
+        batch_contents = [
+            '    return a * b  # Batch: multiplication',
+            '    # Inserted by batch edit',
+            '    # Another inserted line'
+        ]
+        result_batch = await editor.edit_lines(
+            file_path=demo_file,
+            line_numbers=batch_lines,
+            new_contents=batch_contents
+        )
+        print(f"   ✅ Success: {result_batch.success}")
+        print(f"   📊 Lines changed: {result_batch.lines_changed}")
+        if result_batch.error:
+            print(f"   ❌ Error: {result_batch.error}")
         print()
         
     except Exception as e:

@@ -27,7 +27,7 @@ class LineEditor(EditorInterface):
     
     def supports_operation(self, operation_type: EditOperationType) -> bool:
         """Check if this editor supports the given operation type"""
-        return operation_type in self.supported_operations
+        return operation_type in self.supported_operations or operation_type == EditOperationType.APPEND
     
     async def validate_request(self, request: EditRequest) -> bool:
         """Validate if the request can be processed"""
@@ -64,6 +64,8 @@ class LineEditor(EditorInterface):
                 result = await self._edit_line(request, operation_id)
             elif request.operation_type == EditOperationType.RANGE:
                 result = await self._edit_range(request, operation_id)
+            elif request.operation_type == EditOperationType.APPEND:
+                result = await self._append_block(request, operation_id)
             else:
                 return EditResult.error_result(
                     operation_id, request.file_path, request.operation_type,
@@ -244,4 +246,60 @@ class LineEditor(EditorInterface):
             fromfile='original',
             tofile='modified',
             lineterm=''
-        )) 
+        ))
+    
+    async def _append_block(self, request: EditRequest, operation_id: str) -> EditResult:
+        """Append a block of content to the end of the file"""
+        original_content = None
+        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
+            original_content = f.read()
+        with open(request.file_path, 'a', encoding=request.options.encoding) as f:
+            f.write('\n' + request.content.rstrip() + '\n')
+        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
+            modified_content = f.read()
+        diff = self._generate_diff(original_content, modified_content)
+        return EditResult.success_result(
+            operation_id=operation_id,
+            file_path=request.file_path,
+            operation_type=request.operation_type,
+            diff=diff,
+            lines_changed=request.content.count('\n') + 1,
+            bytes_changed=len(modified_content.encode()) - len(original_content.encode())
+        )
+
+    async def edit_lines(self, request: EditRequest) -> EditResult:
+        """Edit or insert multiple lines at specified line numbers"""
+        line_numbers, new_contents = request.target
+        assert len(line_numbers) == len(new_contents), "line_numbers and new_contents must have same length"
+        operation_id = OperationMetadata.generate_operation_id()
+        start_time = time.time()
+        
+        # Read all lines
+        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
+            lines = f.readlines()
+        max_line = max(line_numbers)
+        # Extend file with empty lines if needed
+        while len(lines) < max_line:
+            lines.append('\n')
+        lines_changed = 0
+        for idx, ln in enumerate(line_numbers):
+            # ln is 1-based
+            content = new_contents[idx].rstrip('\n') + '\n'
+            if lines[ln-1] != content:
+                lines[ln-1] = content
+                lines_changed += 1
+        # Write back
+        with open(request.file_path, 'w', encoding=request.options.encoding) as f:
+            f.writelines(lines)
+        # Diff
+        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
+            modified_content = f.read()
+        diff = self._generate_diff(''.join(lines), modified_content)
+        return EditResult.success_result(
+            operation_id=operation_id,
+            file_path=request.file_path,
+            operation_type=EditOperationType.LINE,
+            diff=diff,
+            lines_changed=lines_changed,
+            bytes_changed=0
+        ) 
