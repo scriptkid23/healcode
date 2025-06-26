@@ -1,0 +1,74 @@
+graph TB
+    subgraph "API Layer"
+        API[FastAPI Application]
+        AUTH[Authentication Middleware]
+        VALID[Request Validation]
+        RATE[Rate Limiting]
+    end
+    
+    subgraph "Core Services"
+        ORCH[Orchestrator Service]
+        CONFIG[Configuration Manager]
+        LOGGER[Logging Service]
+        METRICS[Metrics Collector]
+    end
+    
+    subgraph "Business Logic"
+        GIT[Git Service]
+        INDEX[Index Service]
+        AI[AI Service]
+        EDITOR[Editor Service]
+        PR[PR Service]
+    end
+    
+    subgraph "Data Layer"
+        CACHE[Redis Cache]
+        DB[PostgreSQL Database]
+        STORAGE[File Storage]
+    end
+    
+    subgraph "External Services"
+        GITHUB[GitHub API]
+        OPENAI[OpenAI API]
+        ZOEKT[Zoekt Search]
+    end
+    
+    subgraph "Infrastructure"
+        QUEUE[Task Queue]
+        WORKER[Background Workers]
+        MONITOR[Health Monitoring]
+    end
+    
+    API --> AUTH
+    AUTH --> VALID
+    VALID --> RATE
+    RATE --> ORCH
+    
+    ORCH --> CONFIG
+    ORCH --> LOGGER
+    ORCH --> METRICS
+    
+    ORCH --> GIT
+    ORCH --> INDEX
+    ORCH --> AI
+    ORCH --> EDITOR
+    ORCH --> PR
+    
+    GIT --> CACHE
+    INDEX --> ZOEKT
+    AI --> OPENAI
+    PR --> GITHUB
+    
+    ORCH --> QUEUE
+    QUEUE --> WORKER
+    
+    GIT --> STORAGE
+    EDITOR --> STORAGE
+    
+    LOGGER --> DB
+    METRICS --> DB
+    
+    style ORCH fill:#f9f,stroke:#333,stroke-width:4px
+    style API fill:#bbf,stroke:#333,stroke-width:2px
+    style GITHUB fill:#fbb,stroke:#333,stroke-width:2px
+    style OPENAI fill:#bfb,stroke:#333,stroke-width:2px

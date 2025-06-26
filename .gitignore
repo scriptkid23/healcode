@@ -209,3 +209,5 @@ __marimo__/
 /credentials/*.json
 /repository/*
 /codebase/*
+
+.DS_Store
