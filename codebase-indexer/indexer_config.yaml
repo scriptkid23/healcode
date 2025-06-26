@@ -1,0 +1,61 @@
+# Modular Codebase Indexer Framework Configuration
+# This configuration demonstrates the plugin-based architecture following
+# Deep Modules with Simple Interfaces philosophy
+
+plugins:
+  plugins_dir: "plugins"
+  auto_discover: true
+  reload_on_change: false
+  max_concurrent_indexers: 10
+
+event_bus:
+  max_queue_size: 1000
+  max_history: 1000
+  handler_timeout: 30.0
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_path: null
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+
+indexers:
+  - name: "trigram_indexer"
+    plugin_name: "trigram.TrigramIndexer"
+    enabled: true
+    priority: 1
+    settings:
+      trigram_size: 3
+      case_sensitive: false
+      min_word_length: 2
+      max_results: 1000
+    dependencies: []
+
+  # Example configuration for future AST indexer
+  # - name: "ast_indexer"
+  #   plugin_name: "ast.ASTIndexer"
+  #   enabled: false
+  #   priority: 2
+  #   settings:
+  #     supported_languages: ["python", "javascript", "java"]
+  #     parse_comments: true
+  #     extract_symbols: true
+  #   dependencies: []
+
+  # Example configuration for future vector indexer
+  # - name: "vector_indexer"
+  #   plugin_name: "vector.VectorIndexer"
+  #   enabled: false
+  #   priority: 3
+  #   settings:
+  #     model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  #     dimension: 384
+  #     similarity_threshold: 0.7
+  #   dependencies: ["sentence-transformers"]
+
+custom_settings:
+  # Custom framework-level settings can be added here
+  max_file_size: 1048576  # 1MB
+  supported_extensions: [".py", ".js", ".ts", ".java", ".cpp", ".txt", ".md"]
+  exclude_patterns: ["__pycache__", ".git", "node_modules", ".pytest_cache"] 
