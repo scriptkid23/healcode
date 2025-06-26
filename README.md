@@ -1,260 +1,337 @@
-# Enhanced Git Plugin
+# Claris - Intelligent Code Improvement System
 
-An optimized Git Plugin with advanced GitPython integration for efficient Git operations including credential management, repository operations, branch management, and pull request creation.
+**Claris empowers developers by detecting bugs, suggesting improvements, and applying smart fixes automatically, all while maintaining the spirit of your code.**
 
-## 🚀 Features
+## 🌟 Overview
 
-- **Advanced Credential Management**: Secure storage of Git credentials with JSON-based storage
-- **Optimized Git Operations**: Enhanced performance using GitPython with caching and progress tracking
-- **Branch Management**: Create, switch, and manage branches efficiently
-- **Repository Status**: Comprehensive repository status including tracking information
-- **Pull Request Creation**: Automated PR creation for GitHub and GitLab
-- **Complete Workflow**: End-to-end automation from setup to PR creation
-- **REST API**: Enhanced FastAPI-based REST endpoints with detailed responses
+Claris is an advanced AI-powered code improvement system that automatically analyzes your codebase, detects potential issues, and creates pull requests with intelligent fixes and enhancements. Built with a robust Git plugin architecture, Claris seamlessly integrates into your development workflow to maintain code quality without disrupting your coding flow.
 
-## 🎯 Enhanced Workflow
+## ✨ Key Features
 
-1. **Setup Credentials**: Store your Git provider credentials securely
-2. **Repository Operations**: Clone, pull, push, commit with detailed feedback
-3. **Branch Management**: Create feature branches and switch between them
-4. **Status Monitoring**: Track repository status and changes
-5. **Create Pull Request**: Automatically create PR for your repository
-6. **Complete Automation**: Execute full workflow in one command
+### 🤖 **AI-Powered Code Analysis**
+- Intelligent bug detection and code smell identification
+- Context-aware code improvements using advanced AI models (GPT-4/CodeLlama)
+- Maintains your code's original style and intent
 
-## 📦 Installation & Setup
+### 🔧 **Automated Code Fixing**
+- ESLint integration for automated code formatting
+- Smart refactoring suggestions
+- Automatic application of best practices
 
-### Using Poetry (Recommended)
+### 🔄 **Seamless Git Integration**
+- Multi-provider Git support (GitHub, GitLab, Bitbucket)
+- Automated pull request creation
+- Branch management and conflict resolution
+- Webhook integration for real-time triggers
 
-1. **Install Poetry** (if not already installed):
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
+### 🔍 **Advanced Code Search**
+- Zoekt-powered code search engine
+- Fast semantic code discovery
+- Context-aware code analysis
+
+### 🔐 **Enterprise-Grade Security**
+- Secure credential management with encryption
+- Role-based access control (RBAC)
+- Audit logging and compliance support
+
+## 🏗️ Architecture
+
+Claris follows a modern microservices architecture with the following core components:
+
+```
+┌─────────────────────────────────────────────────┐
+│                API Layer                        │
+├─────────────────────────────────────────────────┤
+│              Business Logic Layer               │
+├─────────────────────────────────────────────────┤
+│               Data Access Layer                 │
+├─────────────────────────────────────────────────┤
+│              Infrastructure Layer               │
+└─────────────────────────────────────────────────┘
 ```
 
-2. **Install dependencies**:
+### Core Components
+
+- **Git Operations Engine**: Advanced Git operations with GitPython integration
+- **AI Processing Engine**: Code analysis and improvement generation
+- **Search Engine**: Zoekt-powered code search and indexing
+- **Webhook Processor**: Real-time Git provider event handling
+- **Credentials Manager**: Secure credential storage and management
+- **Build Trigger System**: Automated CI/CD pipeline integration
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- Poetry (for dependency management)
+- Docker & Docker Compose
+- Git
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd claris
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   poetry install
+   ```
+
+3. **Set up environment:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+4. **Start the services:**
+   ```bash
+   docker-compose up -d
+   ```
+
+5. **Run the API server:**
+   ```bash
+   poetry run uvicorn gitplugin.api.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+### First Steps
+
+1. **Create credentials for your Git provider:**
+   ```bash
+   curl --location 'http://localhost:8000/credentials' \
+   --header 'Content-Type: application/json' \
+   --data '{
+       "name": "my-github",
+       "type": "token",
+       "token": "your_github_token"
+   }'
+   ```
+
+2. **Set up a repository:**
+   ```bash
+   curl --location 'http://localhost:8000/git/setup' \
+   --header 'Content-Type: application/json' \
+   --data '{
+       "repo_url": "https://github.com/your-org/your-repo.git",
+       "credential_name": "my-github",
+       "workspace_path": "./workspace"
+   }'
+   ```
+
+3. **Check repository status:**
+   ```bash
+   curl 'http://localhost:8000/git/status?workspace_path=./workspace'
+   ```
+
+## 📖 API Documentation
+
+### Health Check
 ```bash
-poetry install
+GET /health
 ```
 
-3. **Run the application**:
+### Credentials Management
 ```bash
-poetry run uvicorn gitplugin.api.main:app --host 0.0.0.0 --port 8000
+POST /credentials          # Create credential
+GET /credentials           # List credentials
+DELETE /credentials/{name} # Delete credential
 ```
 
-### Using Docker
-
-1. **Build and run**:
+### Git Operations
 ```bash
-docker build -t enhanced-git-plugin .
-docker run -p 8000:8000 enhanced-git-plugin
+POST /git/setup           # Setup repository
+POST /git/pull            # Pull changes
+POST /git/commit          # Commit changes
+POST /git/push            # Push changes
+GET /git/status           # Get repository status
+POST /git/branch/create   # Create branch
+POST /git/branch/switch   # Switch branch
 ```
 
-2. **Access API**:
-   - API: `http://localhost:8000`
-   - Documentation: `http://localhost:8000/docs`
-   - Health Check: `http://localhost:8000/health`
-
-## 🔧 API Usage
-
-### Enhanced Endpoints
-
-#### 1. Credential Management
-
+### Advanced Workflows
 ```bash
-# Create token-based credential
-curl -X POST "http://localhost:8000/credentials" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-github-token",
-    "type": "token",
-    "token": "ghp_xxxxxxxxxxxx"
-  }'
-
-# List credentials
-curl "http://localhost:8000/credentials"
+POST /git/workflow/complete  # Complete Git workflow (branch + commit + PR)
+POST /git/pull-request       # Create pull request
 ```
 
-#### 2. Repository Setup with GitPython Optimization
+## 🔧 Configuration
+
+### Environment Variables
 
 ```bash
-curl -X POST "http://localhost:8000/git/setup" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_url": "https://github.com/user/repo.git",
-    "credential_name": "my-github-token",
-    "workspace_path": "./workspace"
-  }'
+# Database Configuration
+DATABASE_URL=postgresql://user:pass@localhost:5432/claris
+
+# Redis Configuration
+REDIS_URL=redis://localhost:6379
+
+# Security
+SECRET_KEY=your_secret_key_here
+
+# AI Service Configuration
+OPENAI_API_KEY=your_openai_api_key
+AI_MODEL=gpt-4
+
+# Git Configuration
+DEFAULT_BRANCH=main
+WORKSPACE_BASE_PATH=./workspaces
 ```
 
-#### 3. Enhanced Git Operations
+### Docker Deployment
 
-```bash
-# Get comprehensive repository status
-curl "http://localhost:8000/git/status?workspace_path=./workspace"
-
-# Pull with detailed information
-curl -X POST "http://localhost:8000/git/pull?workspace_path=./workspace"
-
-# Commit with file tracking
-curl -X POST "http://localhost:8000/git/commit" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_path": "./workspace",
-    "message": "Enhanced commit with GitPython",
-    "files": ["specific_file.py"]
-  }'
-
-# Push with feedback
-curl -X POST "http://localhost:8000/git/push" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_path": "./workspace",
-    "branch": "main"
-  }'
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  claris-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/claris
+    depends_on:
+      - postgres
+      - redis
 ```
 
-#### 4. Branch Management
+## 🔄 Workflow
 
-```bash
-# Create new branch
-curl -X POST "http://localhost:8000/git/branch/create" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_path": "./workspace",
-    "branch_name": "feature-new-feature",
-    "checkout": true
-  }'
+### Automatic Code Improvement Process
 
-# Switch branch
-curl -X POST "http://localhost:8000/git/branch/switch" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workspace_path": "./workspace",
-    "branch_name": "main"
-  }'
+1. **Code Detection**: Monitor repositories for changes via webhooks or polling
+2. **Code Analysis**: Use Zoekt search to find relevant code context
+3. **AI Processing**: Analyze code and generate improvements using AI models
+4. **Code Formatting**: Apply ESLint fixes and formatting
+5. **Git Operations**: Create branch, commit changes, and push to remote
+6. **Pull Request**: Automatically create PR with improvements
+
+### Request Processing Flow
+
+```mermaid
+flowchart TD
+    START([Start]) --> REQ["Receive API request"]
+    REQ --> SEARCH["Zoekt Search<br/>Find related code"]
+    SEARCH --> AIPROCESS["AI Processing<br/>Generate improvements"]
+    AIPROCESS --> ESLINT["ESLint --fix<br/>Format code"]
+    ESLINT --> BRANCH["Create new Git branch"]
+    BRANCH --> COMMIT["Commit changes"]
+    COMMIT --> PUSH["Push to remote"]
+    PUSH --> CREATEPR["Create Pull Request"]
+    CREATEPR --> SUCCESS["Return PR URL"]
 ```
 
-#### 5. Complete Workflow Automation
-
-```bash
-# Execute complete workflow in one command
-curl -X POST "http://localhost:8000/git/workflow/complete" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_url": "https://github.com/user/repo.git",
-    "credential_name": "my-github-token",
-    "workspace_path": "./workspace",
-    "commit_message": "Automated workflow commit",
-    "branch_name": "feature-automation",
-    "target_branch": "main",
-    "pr_title": "Automated Feature",
-    "pr_description": "This PR was created automatically"
-  }'
-```
-
-## 🛠️ Development
-
-### Poetry Commands
-
-```bash
-# Install dev dependencies
-poetry install --with dev
-
-# Run tests
-poetry run pytest
-
-# Code formatting
-poetry run black gitplugin/
-
-# Type checking
-poetry run mypy gitplugin/
-
-# Linting
-poetry run flake8 gitplugin/
-```
+## 🔧 Development
 
 ### Project Structure
 
 ```
-enhanced-git-plugin/
-├── gitplugin/
-│   ├── api/
-│   │   └── main.py          # Enhanced FastAPI application
-│   └── core/
-│       ├── credentials.py   # Simplified credential management
-│       └── git_operations.py # Optimized GitPython operations
-├── pyproject.toml           # Poetry configuration
-├── Dockerfile               # Poetry-based Docker setup
-└── README.md
+claris/
+├── gitplugin/              # Main Python package
+│   ├── api/               # FastAPI application
+│   │   ├── main.py        # API entry point
+│   │   ├── middleware.py  # Custom middleware
+│   │   └── routes/        # API route modules
+│   ├── core/              # Core business logic
+│   │   ├── credentials.py # Credential management
+│   │   ├── git_operations.py # Git operations
+│   │   └── workspace.py   # Workspace management
+├── architecture/          # System architecture docs
+├── docker/               # Docker configurations
+├── scripts/              # Utility scripts
+└── tests/               # Test suite
 ```
 
-## 🔥 Enhanced Features
-
-### GitPython Optimizations
-
-- **Repository Caching**: Reuse repository instances for better performance
-- **Progress Tracking**: Real-time progress feedback for clone/fetch operations
-- **Detailed Status**: Comprehensive repository status with tracking info
-- **Smart Error Handling**: Better error messages and recovery
-- **Submodule Support**: Automatic submodule handling
-
-### Advanced Operations
-
-- **Change Detection**: Track file changes between commits
-- **Commit Statistics**: Detailed commit information with stats
-- **Branch Tracking**: Monitor ahead/behind status with remote branches
-- **Workflow Automation**: Complete end-to-end workflow execution
-
-## 🌐 Supported Git Providers
-
-- **GitHub**: Full API integration for PR creation
-- **GitLab**: Complete merge request support
-- **Generic Git**: Any HTTPS-accessible Git repository
-
-## 📊 Enhanced Responses
-
-All endpoints now return detailed information:
-
-```json
-{
-  "status": "success",
-  "message": "Changes committed successfully",
-  "commit_hash": "abc123ef",
-  "commit_message": "My commit message",
-  "staged_files": ["file1.py", "file2.py"],
-  "stats": {
-    "files_changed": 2,
-    "insertions": 45,
-    "deletions": 12
-  },
-  "author": "John Doe <john@example.com>",
-  "timestamp": "2024-01-01T12:00:00+00:00"
-}
-```
-
-## 🏥 Health Check
-
-Enhanced health check with feature information:
+### Running Tests
 
 ```bash
-curl http://localhost:8000/health
+# Run all tests
+poetry run pytest
+
+# Run with coverage
+poetry run pytest --cov=gitplugin
+
+# Run specific test file
+poetry run pytest tests/test_git_operations.py
 ```
 
-```json
-{
-  "status": "healthy",
-  "message": "Enhanced Git Plugin API is running",
-  "version": "2.0.0",
-  "features": ["GitPython optimization", "Branch management", "Enhanced status"]
-}
+### Code Quality
+
+```bash
+# Format code
+poetry run black gitplugin/
+
+# Lint code
+poetry run flake8 gitplugin/
+
+# Type checking
+poetry run mypy gitplugin/
 ```
 
-## 🚀 Performance Improvements
+## 🔒 Security
 
-- **35% faster** repository operations with GitPython optimization
-- **Repository caching** reduces setup time for repeated operations
-- **Parallel processing** for multiple Git operations
-- **Smart credential handling** with secure storage
+### Authentication & Authorization
+- API key-based authentication
+- Role-based access control (RBAC)
+- Secure credential storage with encryption
 
-## 📝 License
+### Data Protection
+- Encryption at rest for sensitive data
+- TLS/SSL for data in transit
+- Audit logging for compliance
 
-This project is open source and available under the MIT License.
+### Network Security
+- IP whitelisting for webhooks
+- Rate limiting
+- DDoS protection
+
+## 📊 Monitoring
+
+### Health Checks
+- `/health` - System health status
+- `/ready` - Readiness probe for Kubernetes
+- Component-level health monitoring
+
+### Metrics
+- Build trigger metrics
+- Git operation performance
+- Webhook processing statistics
+- AI processing latency
+
+### Logging
+- Structured logging with JSON format
+- Audit trail for security events
+- Performance monitoring
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Documentation**: [Full Documentation](docs/)
+- **Issues**: [GitHub Issues](https://github.com/your-org/claris/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/claris/discussions)
+
+## 🙏 Acknowledgments
+
+- Built with [FastAPI](https://fastapi.tiangolo.com/)
+- Powered by [GitPython](https://gitpython.readthedocs.io/)
+- Search powered by [Zoekt](https://github.com/google/zoekt)
+- AI integration with OpenAI GPT models
+
+---
+
+**Claris** - Making your code crystal clear, one commit at a time! 💎✨
