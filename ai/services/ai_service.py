@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional
 from ai.core.context_store import ContextStore
 from ai.core.orchestrator import Orchestrator, OrchestratorConfig
 from ai.core.adapters.xai import XaiAdapter, ModelConfig as XaiModelConfig
+from ai.core.adapters.google_gemini import GoogleGeminiAdapter, ModelConfig as GeminiModelConfig
 # from ai.core.adapters.openai import OpenAIAdapter, ModelConfig as OpenAIModelConfig  # Uncomment if you add OpenAI
 
 class AIService:
@@ -13,6 +14,8 @@ class AIService:
         for name, cfg in model_configs.items():
             if name == "xai":
                 adapters[name] = XaiAdapter(XaiModelConfig(**cfg))
+            elif name == "google_gemini":
+                adapters[name] = GoogleGeminiAdapter(GeminiModelConfig(**cfg))
             # elif name == "openai":
             #     adapters[name] = OpenAIAdapter(OpenAIModelConfig(**cfg))
         config = OrchestratorConfig(primary_model=primary_model, fallback_models=[k for k in model_configs if k != primary_model])
@@ -31,4 +34,22 @@ class AIService:
             "analysis": response.content,
             "model_used": response.model_name,
             "latency": response.latency
-        } 
+        }
+
+    async def chat(self, user_message: str) -> dict:
+        """
+        Send a user message to the primary model and return the full raw response from the AI model.
+        """
+        await self.context_store.set("user_message", user_message)
+        response = await self.orchestrator.process(user_message, workflow_type="chat")
+        # Return the full metadata/raw response from the model
+        return response.metadata.get("raw", {})
+
+    def decode_gemini_response(self, response: dict) -> str:
+        """
+        Extract the text output from a Gemini response dict.
+        """
+        try:
+            return response["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception:
+            return "" 

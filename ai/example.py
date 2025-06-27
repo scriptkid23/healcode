@@ -1,5 +1,7 @@
 import asyncio
 from ai import AIService
+from indexer.zoekt_client import ZoektClient
+import os
 
 async def main():
     # Model configurations for xai (add openai if needed)
@@ -8,6 +10,11 @@ async def main():
             "name": "grok-3-latest",
             "endpoint": "https://api.x.ai/v1/chat/completions",
             "api_key": "your-xai-key"
+        },
+        "google_gemini": {
+            "name": "gemini-pro",
+            "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+            "api_key": "AIzaSyBKPHuJidiLJhTRaAFNuuJInHXiwJy7hwk"
         }
         # Add more models here if needed
     }
@@ -15,34 +22,24 @@ async def main():
     # Initialize AIService
     ai_service = AIService(
         tenant_id="tenant1",
-        redis_url="redis://localhost:6379",
+        redis_url="redis://localhost:6380",
         model_configs=model_configs,
-        primary_model="xai"
+        primary_model="google_gemini"
     )
 
-    # Example error message and code context
-    error_message = "TypeError: 'NoneType' object is not subscriptable at line 45"
-    code_context = """
-    def process_data(data):
-        result = data.get('items')  # Line 45
-        return result[0]['name']
-    """
-    project_info = {
-        "language": "Python",
-        "framework": "Flask",
-        "version": "3.9"
-    }
 
-    # Run debug and fix pipeline
-    result = await ai_service.debug_and_fix(
-        error_message=error_message,
-        code_context=code_context,
-        project_info=project_info
-    )
-
-    print("AI Debug Analysis:", result["analysis"])
-    print("Model Used:", result["model_used"])
-    print("Latency (s):", result["latency"])
+    # --- New flow: dùng Zoekt để tìm main.js và hỏi AI về lỗi ---
+    zoekt = ZoektClient()
+    main_js_results = await zoekt.search_by_filename("main.js")
+    if main_js_results:
+        main_js_code = main_js_results[0]["Content"]
+        print("\nNội dung main.js (từ Zoekt):\n", main_js_code)
+        ai_prompt = f"Đọc nội dung file main.js sau. File này có lỗi ở dòng nào? Cách sửa ra sao?\n{main_js_code}"
+        raw_response = await ai_service.chat(ai_prompt)
+        answer = ai_service.decode_gemini_response(raw_response)
+        print("\nAI trả lời về lỗi và cách sửa:", answer)
+    else:
+        print("Không tìm thấy file main.js trong codebase qua Zoekt.")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
