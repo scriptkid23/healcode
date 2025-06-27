@@ -33,34 +33,33 @@ async def main():
     )
 
 
-   
-
-    # --- New flow: Zoekt + AI xuất tham số batch edit và sửa file main.js ---
     demo_file = "codebase/controls/control-1/main.js"
     zoekt = ZoektClient()
     main_js_results = await zoekt.search_by_filename("main.js")
     if main_js_results:
         main_js_code = main_js_results[0]["Content"]
-        # Đánh số dòng trước khi hỏi AI
         main_js_code_numbered = add_line_numbers_to_code(main_js_code)
         print("\nNội dung main.js (từ Zoekt, đã đánh số dòng):\n", main_js_code_numbered)
         ai_prompt = (
-            "Đọc nội dung file main.js sau (có đánh số dòng). Nếu có lỗi, hãy chỉ ra các dòng cần sửa (bắt đầu từ 1) "
-            "và nội dung mới cho từng dòng để sửa lỗi. "
-            "Trả về kết quả ở dạng JSON với 2 trường: line_numbers (danh sách số dòng), "
-            "new_contents (danh sách nội dung mới cho từng dòng, cùng thứ tự). "
-            "Chỉ trả về JSON, không giải thích gì thêm.\n"
+            "Below is the content of main.js, with each line numbered in the format \"1. code\", \"2. code\", etc.\n\n"
+            "Your task:\n"
+            "- Carefully review the code and identify any lines that contain bugs, undefined variables, or logic errors.\n"
+            "- For each line that needs to be fixed, provide the corrected content for that line.\n"
+            "- Only include lines that actually need to be changed (do not include lines that are already correct).\n"
+            "- Return your answer as a JSON object with two fields:\n"
+            "  - \"line_numbers\": a list of line numbers (integers, starting from 1) that should be changed.\n"
+            "  - \"new_contents\": a list of the new content for each corresponding line, in the same order.\n"
+            "- Only output the JSON object, with no explanation or extra text.\n\n"
+            "Here is the code:\n"
             f"{main_js_code_numbered}"
         )
         raw_response = await ai_service.chat(ai_prompt)
         json_str = ai_service.decode_gemini_response(raw_response)
         print("\nAI trả về JSON:", json_str)
-        # Loại bỏ markdown nếu có
         json_str_clean = re.sub(r"^```json|```$", "", json_str.strip(), flags=re.MULTILINE).strip()
         params = json.loads(json_str_clean)
         line_numbers = params["line_numbers"]
         new_contents = params["new_contents"]
-        # Khởi tạo editor
         config = EditorConfig()
         editor = EditorService(config)
         result_batch = await editor.edit_lines(
