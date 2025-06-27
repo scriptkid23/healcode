@@ -43,7 +43,7 @@ async def demo_basic_editing():
         result1 = await editor.edit_line(
             file_path=demo_file,
             line_number=2,
-            new_content='    return a * b  # Changed from addition to multiplication'
+            new_content='    return a - b  # Changed from addition to multiplication'
         )
         
         print(f"   ✅ Success: {result1.success}")

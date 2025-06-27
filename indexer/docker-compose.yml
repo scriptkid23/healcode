@@ -1,0 +1,13 @@
+services:
+  zoekt:
+    build: .
+    container_name: zoekt-simple
+    ports:
+      - "6070:6070"
+    volumes:
+      - ./codebase:/data/repos:ro
+      - zoekt_index:/data/index
+    restart: unless-stopped
+
+volumes:
+  zoekt_index:
