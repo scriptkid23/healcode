@@ -65,4 +65,11 @@ class ZoektClient:
         try:
             return base64.b64decode(s).decode("utf-8")
         except Exception:
-            return "<decode error>" 
+            return "<decode error>"
+
+def add_line_numbers_to_code(code: str) -> str:
+    """
+    Add line numbers to each line of code, formatted as '1. code', '2. code', ...
+    """
+    lines = code.splitlines()
+    return "\n".join(f"{i+1}. {line}" for i, line in enumerate(lines)) 
