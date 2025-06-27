@@ -20,7 +20,10 @@ RUN mkdir -p /data/repos /data/index
 WORKDIR /data
 
 ENTRYPOINT [ "sh", "-c", "\
-    echo '🔍 Indexing all repositories...'; \
-    zoekt-index -index /data/index /data/repos; \
+    echo '🔍 Starting periodic indexing every 60s...'; \
+    while true; do \
+      zoekt-index -index /data/index /data/repos; \
+      sleep 60; \
+    done & \
     echo '🚀 Starting Zoekt webserver on :6070'; \
     exec zoekt-webserver -index /data/index -listen :6070 -rpc" ]

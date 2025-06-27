@@ -5,7 +5,7 @@ services:
     ports:
       - "6070:6070"
     volumes:
-      - ./codebase:/data/repos:ro
+      - ../codebase:/data/repos:ro
       - zoekt_index:/data/index
     restart: unless-stopped
 
