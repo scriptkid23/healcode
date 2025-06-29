@@ -2,39 +2,39 @@
 
 **Claris empowers developers by detecting bugs, suggesting improvements, and applying smart fixes automatically, all while maintaining the spirit of your code.**
 
-## 🌟 Overview
+## Overview
 
 Claris is an advanced AI-powered code improvement system that automatically analyzes your codebase, detects potential issues, and creates pull requests with intelligent fixes and enhancements. Built with a robust Git plugin architecture, Claris seamlessly integrates into your development workflow to maintain code quality without disrupting your coding flow.
 
-## ✨ Key Features
+## Key Features
 
-### 🤖 **AI-Powered Code Analysis**
+### **AI-Powered Code Analysis**
 - Intelligent bug detection and code smell identification
 - Context-aware code improvements using advanced AI models (GPT-4/CodeLlama)
 - Maintains your code's original style and intent
 
-### 🔧 **Automated Code Fixing**
+### **Automated Code Fixing**
 - ESLint integration for automated code formatting
 - Smart refactoring suggestions
 - Automatic application of best practices
 
-### 🔄 **Seamless Git Integration**
+### **Seamless Git Integration**
 - Multi-provider Git support (GitHub, GitLab, Bitbucket)
 - Automated pull request creation
 - Branch management and conflict resolution
 - Webhook integration for real-time triggers
 
-### 🔍 **Advanced Code Search**
+### **Advanced Code Search**
 - Zoekt-powered code search engine
 - Fast semantic code discovery
 - Context-aware code analysis
 
-### 🔐 **Enterprise-Grade Security**
+### **Enterprise-Grade Security**
 - Secure credential management with encryption
 - Role-based access control (RBAC)
 - Audit logging and compliance support
 
-## 🏗️ Architecture
+## Architecture
 
 Claris follows a modern microservices architecture with the following core components:
 
@@ -59,7 +59,7 @@ Claris follows a modern microservices architecture with the following core compo
 - **Credentials Manager**: Secure credential storage and management
 - **Build Trigger System**: Automated CI/CD pipeline integration
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -126,7 +126,7 @@ Claris follows a modern microservices architecture with the following core compo
    curl 'http://localhost:8000/git/status?workspace_path=./workspace'
    ```
 
-## 📖 API Documentation
+## API Documentation
 
 ### Health Check
 ```bash
@@ -157,7 +157,7 @@ POST /git/workflow/complete  # Complete Git workflow (branch + commit + PR)
 POST /git/pull-request       # Create pull request
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
@@ -197,7 +197,7 @@ services:
       - redis
 ```
 
-## 🔄 Workflow
+## Workflow
 
 ### Automatic Code Improvement Process
 
@@ -223,7 +223,7 @@ flowchart TD
     CREATEPR --> SUCCESS["Return PR URL"]
 ```
 
-## 🔧 Development
+## Development
 
 ### Project Structure
 
@@ -270,7 +270,7 @@ poetry run flake8 gitplugin/
 poetry run mypy gitplugin/
 ```
 
-## 🔒 Security
+## Security
 
 ### Authentication & Authorization
 - API key-based authentication
@@ -287,7 +287,7 @@ poetry run mypy gitplugin/
 - Rate limiting
 - DDoS protection
 
-## 📊 Monitoring
+## Monitoring
 
 ### Health Checks
 - `/health` - System health status
@@ -325,7 +325,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: [GitHub Issues](https://github.com/your-org/claris/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-org/claris/discussions)
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built with [FastAPI](https://fastapi.tiangolo.com/)
 - Powered by [GitPython](https://gitpython.readthedocs.io/)
