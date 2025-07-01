@@ -11,13 +11,14 @@ from ..interfaces import (
     EditRequest, EditResult, EditOperationType, EditorInterface,
     FileNotFoundException, ValidationException, OperationMetadata
 )
+from .base_ast_editor import BaseASTEditor
 
 
-class ASTEditor(EditorInterface):
+class ASTEditor(BaseASTEditor):
     """Editor for AST-based code modifications"""
     
     def __init__(self):
-        self.supported_operations = {EditOperationType.AST}
+        super().__init__()
         self.supported_extensions = {'.py'}  # Currently only Python
     
     def supports_operation(self, operation_type: EditOperationType) -> bool:
@@ -90,7 +91,7 @@ class ASTEditor(EditorInterface):
             original_content = f.read()
         
         # Parse AST transformation instructions
-        transformation_config = self._parse_transformation_config(request.target, request.content)
+        transformation_config = self._parse_transformation_config(str(request.target), request.content)
         
         # Parse the original file
         try:
@@ -318,7 +319,7 @@ class ASTTransformer(ast.NodeTransformer):
                 
                 if modification_type == 'add_docstring':
                     docstring = self.config.get('parameters', {}).get('docstring', '')
-                    docstring_node = ast.Expr(value=ast.Str(s=docstring))
+                    docstring_node = ast.Expr(value=ast.Constant(value=docstring))
                     node.body.insert(0, docstring_node)
                     self.applied_transformations.append(f"Added docstring to {target_function}")
         
@@ -361,7 +362,7 @@ class ASTTransformer(ast.NodeTransformer):
                             kwarg=None,
                             defaults=[]
                         ),
-                        body=[ast.Expr(value=ast.Str(s=method_body))],
+                        body=[ast.Expr(value=ast.Constant(value=method_body))],
                         decorator_list=[],
                         returns=None
                     )
