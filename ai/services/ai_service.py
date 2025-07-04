@@ -1,10 +1,6 @@
 from typing import Dict, Any, Optional, List
 from ai.core.context_store import ContextStore
 from ai.core.repo_processor import RepoProcessor
-# from ai.core.orchestrator import Orchestrator, OrchestratorConfig # Removing orchestrator
-# from ai.core.adapters.xai import XaiAdapter, ModelConfig as XaiModelConfig # No longer used
-# from ai.core.adapters.google_gemini import GoogleGeminiAdapter, ModelConfig as GeminiModelConfig # No longer used
-# from ai.core.adapters.openai import OpenAIAdapter, ModelConfig as OpenAIModelConfig  # Uncomment if you add OpenAI
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
@@ -121,13 +117,4 @@ class AIService:
         assert self.primary_llm is not None
         await self.context_store.set("user_message", user_message)
         response = await self.primary_llm.ainvoke(user_message)
-        return response.content
-
-    def decode_gemini_response(self, response: dict) -> str:
-        """
-        Extract the text output from a Gemini response dict.
-        """
-        try:
-            return response["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
-            return "" 
+        return response.content 

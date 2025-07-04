@@ -1,4 +1,3 @@
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from typing import List
 
@@ -45,25 +44,6 @@ class RepoProcessor:
             ))
             
         return docs
-
-    def convert_relative_to_absolute_line(self, doc: Document, relative_line: int) -> int:
-        """
-        Converts a line number relative to a document chunk to an absolute line
-        number in the original file.
-        
-        Args:
-            doc: Document chunk with start_line metadata
-            relative_line: 1-based line number relative to the chunk (1 = first line of chunk)
-        
-        Returns:
-            1-based absolute line number in the original repository
-            
-        Example:
-            If chunk starts at line 10 and relative_line is 1, returns 10
-            If chunk starts at line 10 and relative_line is 2, returns 11
-        """
-        start_line = doc.metadata.get("start_line", 1)
-        return start_line + relative_line - 1
 
     def add_line_numbers_to_content(self, content: str, start_line: int = 1) -> str:
         """
