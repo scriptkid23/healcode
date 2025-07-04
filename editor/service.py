@@ -18,7 +18,7 @@ except ImportError:
 from .interfaces import (
     EditRequest, EditResult, EditOperationType, EditOptions, RollbackRequest, RollbackResult,
     EditorInterface, BackupInfo, OperationMetadata,
-    EditorException, FileLockedException, BackupException
+    EditorException, FileLockedException, BackupException, ValidationException
 )
 from .strategies import LineEditor, PatternEditor, ASTEditor
 
@@ -44,7 +44,7 @@ class EditorConfig:
 class EditorService:
     """Main editor service that orchestrates all editing operations"""
     
-    def __init__(self, config: EditorConfig = None):
+    def __init__(self, config: Optional[EditorConfig] = None):
         self.config = config or EditorConfig()
         
         # Initialize editing strategies
@@ -115,7 +115,7 @@ class EditorService:
                 del self.active_operations[operation_id]
     
     async def edit_line(self, file_path: str, line_number: int, 
-                       new_content: str, options: EditOptions = None) -> EditResult:
+                       new_content: str, options: Optional[EditOptions] = None) -> EditResult:
         """Convenience method for line editing"""
         
         request = EditRequest(
@@ -123,12 +123,12 @@ class EditorService:
             operation_type=EditOperationType.LINE,
             target=line_number,
             content=new_content,
-            options=options or EditOptions()
+            options=options if options is not None else EditOptions()
         )
         return await self.edit_file(request)
     
     async def edit_range(self, file_path: str, start_line: int, end_line: int,
-                        new_content: str, options: EditOptions = None) -> EditResult:
+                        new_content: str, options: Optional[EditOptions] = None) -> EditResult:
         """Convenience method for range editing"""
         
         request = EditRequest(
@@ -136,12 +136,12 @@ class EditorService:
             operation_type=EditOperationType.RANGE,
             target=range(start_line, end_line + 1),
             content=new_content,
-            options=options or EditOptions()
+            options=options if options is not None else EditOptions()
         )
         return await self.edit_file(request)
     
     async def edit_pattern(self, file_path: str, pattern: str, 
-                          replacement: str, options: EditOptions = None) -> EditResult:
+                          replacement: str, options: Optional[EditOptions] = None) -> EditResult:
         """Convenience method for pattern editing"""
         
         request = EditRequest(
@@ -149,18 +149,18 @@ class EditorService:
             operation_type=EditOperationType.PATTERN,
             target=pattern,
             content=replacement,
-            options=options or EditOptions()
+            options=options if options is not None else EditOptions()
         )
         return await self.edit_file(request)
     
-    async def append_block(self, file_path: str, content: str, options: EditOptions = None) -> EditResult:
+    async def append_block(self, file_path: str, content: str, options: Optional[EditOptions] = None) -> EditResult:
         """Append a block of content to the end of a file"""
         request = EditRequest(
             file_path=file_path,
             operation_type=EditOperationType.APPEND,
             target=None,
             content=content,
-            options=options or EditOptions()
+            options=options if options is not None else EditOptions()
         )
         return await self.edit_file(request)
     
@@ -389,17 +389,16 @@ class EditorService:
         """Clean up old backup files"""
         await self.backup_manager.cleanup_old_backups()
 
-    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: list, options: EditOptions = None) -> EditResult:
-        """Edit or insert multiple lines at specified line numbers"""
-        from .interfaces import EditRequest, EditOperationType
+    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: list, options: Optional[EditOptions] = None) -> EditResult:
+        """Convenience method for editing multiple lines"""
         request = EditRequest(
             file_path=file_path,
             operation_type=EditOperationType.LINE,
-            target=(line_numbers, new_contents),
-            content="",  # not used
-            options=options or EditOptions()
+            target=line_numbers,
+            content=new_contents,
+            options=options if options is not None else EditOptions()
         )
-        return await self.strategies[EditOperationType.LINE].edit_lines(request)
+        return await self.edit_file(request)
 
 
 class BackupManager:

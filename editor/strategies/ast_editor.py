@@ -21,6 +21,27 @@ class ASTEditor(BaseASTEditor):
         super().__init__()
         self.supported_extensions = {'.py'}  # Currently only Python
     
+    def get_supported_extensions(self) -> set[str]:
+        return self.supported_extensions
+
+    async def parse_file(self, file_path: str, content: str) -> Any:
+        raise NotImplementedError
+
+    async def transform_ast(self, ast_tree: Any, transformation_config: Dict[str, Any]) -> Any:
+        raise NotImplementedError
+
+    async def ast_to_source(self, ast_tree: Any) -> str:
+        raise NotImplementedError
+
+    def validate_syntax(self, content: str) -> bool:
+        raise NotImplementedError
+
+    def get_language_name(self) -> str:
+        raise NotImplementedError
+
+    async def analyze_ast_structure(self, ast_tree: Any) -> Dict[str, Any]:
+        raise NotImplementedError
+
     def supports_operation(self, operation_type: EditOperationType) -> bool:
         """Check if this editor supports the given operation type"""
         return operation_type in self.supported_operations
@@ -90,6 +111,9 @@ class ASTEditor(BaseASTEditor):
         with open(request.file_path, 'r', encoding=request.options.encoding) as f:
             original_content = f.read()
         
+        if not isinstance(request.content, str):
+            raise ValidationException("Content for AST edit must be a string.")
+
         # Parse AST transformation instructions
         transformation_config = self._parse_transformation_config(str(request.target), request.content)
         

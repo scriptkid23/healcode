@@ -61,7 +61,7 @@ class LineEditor(EditorInterface):
             await self.validate_request(request)
             
             if request.operation_type == EditOperationType.LINE:
-                result = await self._edit_line(request, operation_id)
+                result = await self._edit_lines(request, operation_id)
             elif request.operation_type == EditOperationType.RANGE:
                 result = await self._edit_range(request, operation_id)
             elif request.operation_type == EditOperationType.APPEND:
@@ -81,32 +81,41 @@ class LineEditor(EditorInterface):
                 execution_time_ms=(time.time() - start_time) * 1000
             )
     
-    async def _edit_line(self, request: EditRequest, operation_id: str) -> EditResult:
-        """Edit a specific line"""
-        target_line = request.target
-        if not isinstance(target_line, int):
-            raise ValidationException("Line target must be an integer")
-        
+    async def _edit_lines(self, request: EditRequest, operation_id: str) -> EditResult:
+        """Edits one or more specific lines based on the request."""
+        if isinstance(request.target, int):
+            target_lines = [request.target]
+            new_contents = [request.content]
+        elif isinstance(request.target, list) and isinstance(request.content, list):
+            target_lines = request.target
+            new_contents = request.content
+        else:
+            raise ValidationException("For LINE operation, target must be an int or a list, and content must match.")
+
+        edit_map = dict(zip(target_lines, new_contents))
         lines_changed = 0
-        original_content = None
-        
-        # Read original content for diff
+
         with open(request.file_path, 'r', encoding=request.options.encoding) as f:
             original_content = f.read()
-        
-        # Use in_place if available, otherwise fallback to fileinput
-        if HAS_IN_PLACE:
-            lines_changed = await self._edit_line_inplace(request, target_line)
-        else:
-            lines_changed = await self._edit_line_fileinput(request, target_line)
-        
-        # Read modified content for diff
-        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
-            modified_content = f.read()
-        
-        # Generate diff
+            lines = original_content.splitlines()
+
+        modified_lines = []
+        for i, line in enumerate(lines, start=1):
+            if i in edit_map:
+                modified_lines.append(edit_map[i])
+                lines_changed += 1
+            else:
+                modified_lines.append(line)
+
+        modified_content = '\n'.join(modified_lines)
+        if original_content.endswith('\n'):
+             modified_content += '\n'
+
+        with open(request.file_path, 'w', encoding=request.options.encoding) as f:
+            f.write(modified_content)
+            
         diff = self._generate_diff(original_content, modified_content)
-        
+
         return EditResult.success_result(
             operation_id=operation_id,
             file_path=request.file_path,
@@ -115,46 +124,6 @@ class LineEditor(EditorInterface):
             lines_changed=lines_changed,
             bytes_changed=len(modified_content.encode()) - len(original_content.encode())
         )
-    
-    async def _edit_line_inplace(self, request: EditRequest, target_line: int) -> int:
-        """Edit line using in_place library"""
-        lines_changed = 0
-        
-        with in_place.InPlace(
-            request.file_path, 
-            encoding=request.options.encoding
-        ) as file:
-            for line_num, line in enumerate(file, start=1):
-                if line_num == target_line:
-                    file.write(request.content + '\n')
-                    lines_changed = 1
-                else:
-                    file.write(line)
-        
-        return lines_changed
-    
-    async def _edit_line_fileinput(self, request: EditRequest, target_line: int) -> int:
-        """Edit line using fileinput as fallback"""
-        lines_changed = 0
-        
-        # Create backup if requested
-        if request.options.create_backup:
-            import shutil
-            backup_path = f"{request.file_path}.bak"
-            shutil.copy2(request.file_path, backup_path)
-        
-        for line in fileinput.input(
-            request.file_path, 
-            inplace=True, 
-            encoding=request.options.encoding
-        ):
-            if fileinput.lineno() == target_line:
-                print(request.content)
-                lines_changed = 1
-            else:
-                print(line, end='')
-        
-        return lines_changed
     
     async def _edit_range(self, request: EditRequest, operation_id: str) -> EditResult:
         """Edit a range of lines"""
@@ -194,6 +163,8 @@ class LineEditor(EditorInterface):
     async def _edit_range_inplace(self, request: EditRequest, target_range: range) -> int:
         """Edit range using in_place library"""
         lines_changed = 0
+        if not isinstance(request.content, str):
+            raise ValidationException("Content for range edit must be a string.")
         content_lines = request.content.split('\n') if request.content else []
         
         with in_place.InPlace(
@@ -214,6 +185,8 @@ class LineEditor(EditorInterface):
     async def _edit_range_fileinput(self, request: EditRequest, target_range: range) -> int:
         """Edit range using fileinput as fallback"""
         lines_changed = 0
+        if not isinstance(request.content, str):
+            raise ValidationException("Content for range edit must be a string.")
         content_lines = request.content.split('\n') if request.content else []
         
         # Create backup if requested
@@ -251,6 +224,8 @@ class LineEditor(EditorInterface):
     async def _append_block(self, request: EditRequest, operation_id: str) -> EditResult:
         """Append a block of content to the end of the file"""
         original_content = None
+        if not isinstance(request.content, str):
+            raise ValidationException("Content for append must be a string.")
         with open(request.file_path, 'r', encoding=request.options.encoding) as f:
             original_content = f.read()
         with open(request.file_path, 'a', encoding=request.options.encoding) as f:
@@ -265,41 +240,4 @@ class LineEditor(EditorInterface):
             diff=diff,
             lines_changed=request.content.count('\n') + 1,
             bytes_changed=len(modified_content.encode()) - len(original_content.encode())
-        )
-
-    async def edit_lines(self, request: EditRequest) -> EditResult:
-        """Edit or insert multiple lines at specified line numbers"""
-        line_numbers, new_contents = request.target
-        assert len(line_numbers) == len(new_contents), "line_numbers and new_contents must have same length"
-        operation_id = OperationMetadata.generate_operation_id()
-        start_time = time.time()
-        
-        # Read all lines
-        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
-            lines = f.readlines()
-        max_line = max(line_numbers)
-        # Extend file with empty lines if needed
-        while len(lines) < max_line:
-            lines.append('\n')
-        lines_changed = 0
-        for idx, ln in enumerate(line_numbers):
-            # ln is 1-based
-            content = new_contents[idx].rstrip('\n') + '\n'
-            if lines[ln-1] != content:
-                lines[ln-1] = content
-                lines_changed += 1
-        # Write back
-        with open(request.file_path, 'w', encoding=request.options.encoding) as f:
-            f.writelines(lines)
-        # Diff
-        with open(request.file_path, 'r', encoding=request.options.encoding) as f:
-            modified_content = f.read()
-        diff = self._generate_diff(''.join(lines), modified_content)
-        return EditResult.success_result(
-            operation_id=operation_id,
-            file_path=request.file_path,
-            operation_type=EditOperationType.LINE,
-            diff=diff,
-            lines_changed=lines_changed,
-            bytes_changed=0
         ) 

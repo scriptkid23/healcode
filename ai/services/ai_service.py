@@ -11,6 +11,8 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain.schema import Document
+import asyncio
 
 from ai.prompts.code_analysis import CodeFix, CODE_FIX_PROMPT_TEMPLATE
 
@@ -65,15 +67,44 @@ class AIService:
         self.chain = self.prompt | self.primary_llm | self.parser
 
 
-    async def debug_and_fix(self, repo_content: str, project_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def debug_and_fix(self, documents: List[Document], project_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if project_info:
             await self.context_store.set("project_info", project_info)
 
-        # The prompt uses {code} as the input variable for the repository content.
-        result = await self.chain.ainvoke({"code": repo_content})
-        
-        await self.context_store.set("debug_analysis", result)
-        return result
+        all_line_numbers = []
+        all_new_contents = []
+        metadata = {}
+
+        async def process_doc(doc):
+            # The prompt uses {code} as the input variable for the repository content.
+            result = await self.chain.ainvoke({"code": doc.page_content})
+            
+            if result.get("line_numbers"):
+                # Convert relative line numbers to absolute
+                start_line = doc.metadata.get("start_line", 1)
+                absolute_lines = [l + start_line - 1 for l in result["line_numbers"]]
+                
+                return absolute_lines, result["new_contents"], result.get("metadata", {})
+            return [], [], {}
+
+        tasks = [process_doc(doc) for doc in documents]
+        results = await asyncio.gather(*tasks)
+
+        for absolute_lines, new_contents, meta in results:
+            all_line_numbers.extend(absolute_lines)
+            all_new_contents.extend(new_contents)
+            # Combine metadata (simplified: last one wins for now)
+            if meta:
+                metadata = meta
+
+        final_result = {
+            "line_numbers": all_line_numbers,
+            "new_contents": all_new_contents,
+            "metadata": metadata
+        }
+
+        await self.context_store.set("debug_analysis", final_result)
+        return final_result
 
     async def chat(self, user_message: str) -> str:
         """

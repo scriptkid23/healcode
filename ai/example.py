@@ -4,6 +4,7 @@ import os
 sys.path.append(os.getcwd())
 
 from ai.services.ai_service import AIService
+from ai.core.repo_processor import RepoProcessor
 from indexer.zoekt_client import ZoektClient
 import os
 from editor.service import EditorService, EditorConfig
@@ -25,28 +26,30 @@ async def main():
         # }
     }
 
-    # Initialize AIService
+    # Initialize services
     ai_service = AIService(
         tenant_id="tenant1",
         redis_url="redis://localhost:6380",
         model_configs=model_configs,
         primary_model="google_gemini"
     )
+    repo_processor = RepoProcessor()
+    zoekt = ZoektClient()
 
     demo_file = "codebase/controls/control-1/main.js"
-    zoekt = ZoektClient()
     main_js_results = await zoekt.search_by_filename("main.js")
     
     if main_js_results:
         main_js_code = main_js_results[0]["Content"]
         print("\nOriginal main.js content (from Zoekt):\n", main_js_code)
 
-        # The new AIService expects the repo content with file headers
+        # Create documents with line number metadata
         repo_content = f"## File: {demo_file}\n{main_js_code}"
+        documents = repo_processor.create_documents_from_repo_content(repo_content)
 
-        # Call the new debug_and_fix method
+        # Call the new debug_and_fix method with documents
         print("\nSending request to AI for analysis...")
-        ai_result = await ai_service.debug_and_fix(repo_content=repo_content)
+        ai_result = await ai_service.debug_and_fix(documents=documents)
         
         print("\nAI response:", json.dumps(ai_result, indent=2))
 

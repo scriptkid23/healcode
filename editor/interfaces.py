@@ -35,8 +35,8 @@ class EditRequest:
     """Request model for file editing operations"""
     file_path: str
     operation_type: EditOperationType
-    target: Union[int, range, str, None]  # line number, range, pattern, or None for append
-    content: str
+    target: Union[int, range, str, None, List[int]]
+    content: Union[str, List[str]]
     options: EditOptions = field(default_factory=EditOptions)
     
     def __post_init__(self):
@@ -44,17 +44,12 @@ class EditRequest:
         if not self.file_path:
             raise ValueError("file_path cannot be empty")
         
-        # Special logic for batch edit: target is tuple (line_numbers, new_contents)
         if self.operation_type == EditOperationType.LINE:
-            if isinstance(self.target, tuple):
-                line_numbers, new_contents = self.target
-                if not line_numbers or not new_contents or len(line_numbers) != len(new_contents):
-                    raise ValueError("For batch edit, line_numbers and new_contents must be non-empty and same length")
-            else:
-                if not isinstance(self.target, int) or self.target < 1:
-                    raise ValueError("Line number must be a positive integer")
-                if not self.content:
-                    raise ValueError("content cannot be empty for non-pattern operations")
+            if isinstance(self.target, list):
+                if not isinstance(self.content, list) or len(self.target) != len(self.content):
+                    raise ValueError("For batch line edit, target and content must be lists of the same length")
+            elif not isinstance(self.target, int) or self.target < 1:
+                raise ValueError("Line number must be a positive integer")
         elif self.operation_type == EditOperationType.RANGE:
             if not isinstance(self.target, range):
                 raise ValueError("Range target must be a range object")
