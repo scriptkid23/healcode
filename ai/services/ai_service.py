@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional, List
 from ai.core.context_store import ContextStore
+from ai.core.repo_processor import RepoProcessor
 # from ai.core.orchestrator import Orchestrator, OrchestratorConfig # Removing orchestrator
 # from ai.core.adapters.xai import XaiAdapter, ModelConfig as XaiModelConfig # No longer used
 # from ai.core.adapters.google_gemini import GoogleGeminiAdapter, ModelConfig as GeminiModelConfig # No longer used
@@ -7,7 +8,7 @@ from ai.core.context_store import ContextStore
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -30,6 +31,7 @@ class AIService:
         import redis.asyncio as redis
         redis_client = redis.from_url(redis_url)
         self.context_store = ContextStore(tenant_id, redis_client)
+        self.repo_processor = RepoProcessor()  # Add repo processor instance
         
         self.llms = {}
         for name, cfg in model_configs.items():
@@ -76,13 +78,19 @@ class AIService:
         metadata = {}
 
         async def process_doc(doc):
+            # Add line numbers to content to help AI accurately identify lines
+            start_line = doc.metadata.get("start_line", 1)
+            numbered_content = self.repo_processor.add_line_numbers_to_content(
+                doc.page_content, start_line
+            )
+            
             # The prompt uses {code} as the input variable for the repository content.
-            result = await self.chain.ainvoke({"code": doc.page_content})
+            result = await self.chain.ainvoke({"code": numbered_content})
             
             if result.get("line_numbers"):
-                # Convert relative line numbers to absolute
-                start_line = doc.metadata.get("start_line", 1)
-                absolute_lines = [l + start_line - 1 for l in result["line_numbers"]]
+                # AI model now returns absolute line numbers directly since we provided numbered content
+                # No conversion needed since the line numbers in the content are already absolute
+                absolute_lines = result["line_numbers"]
                 
                 return absolute_lines, result["new_contents"], result.get("metadata", {})
             return [], [], {}
