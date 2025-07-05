@@ -1,0 +1,54 @@
+# Development Configuration for AI Service
+# Copy this file and modify values as needed
+
+tenant_id: "dev_tenant"
+environment: "development"
+primary_model: "google_gemini"
+log_level: "DEBUG"
+
+# AI Model Configurations
+models:
+  google_gemini:
+    name: "gemini-1.5-flash-latest"
+    api_key: "${GOOGLE_API_KEY}"  # Set environment variable
+    timeout: 30.0
+    temperature: 0.7
+
+# Redis Configuration  
+redis:
+  url: "redis://localhost:6379"
+  db: 0
+  max_connections: 20
+  socket_timeout: 5.0
+
+# Zoekt Search Configuration
+zoekt:
+  endpoint: "http://127.0.0.1:6070/api/search"
+  timeout: 10.0
+  max_context_files: 10
+
+# Cache Settings
+cache:
+  default_ttl: 1800  # 30 minutes for development
+  compression_threshold: 1024
+  enable_compression: true
+
+# Performance Settings
+performance:
+  max_concurrent_requests: 5
+  request_rate_limit: 60
+  context_analysis_timeout: 30.0
+  enable_batching: true
+  batch_size: 3
+
+# Security Settings
+security:
+  enable_audit_logging: true
+  max_file_size: 10485760  # 10MB
+  allowed_file_extensions:
+    - ".py"
+    - ".js" 
+    - ".ts"
+    - ".java"
+    - ".go"
+    - ".rs" 

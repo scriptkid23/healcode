@@ -1,0 +1,68 @@
+# Production Configuration for AI Service
+# Optimized for high performance and reliability
+
+tenant_id: "prod_tenant"
+environment: "production"
+primary_model: "google_gemini"
+log_level: "INFO"
+
+# AI Model Configurations
+models:
+  google_gemini:
+    name: "gemini-1.5-flash-latest"
+    api_key: "${GOOGLE_API_KEY}"
+    timeout: 60.0
+    temperature: 0.5  # More conservative for production
+  
+  openai:
+    name: "gpt-4"
+    api_key: "${OPENAI_API_KEY}"
+    timeout: 60.0
+    temperature: 0.5
+
+# Redis Configuration with high availability settings
+redis:
+  url: "${REDIS_URL}"
+  db: 0
+  max_connections: 50
+  socket_timeout: 10.0
+  retry_on_timeout: true
+
+# Zoekt Search Configuration
+zoekt:
+  endpoint: "${ZOEKT_ENDPOINT}"
+  timeout: 15.0
+  max_context_files: 20
+  max_results: 150
+
+# Cache Settings for production
+cache:
+  default_ttl: 7200  # 2 hours
+  compression_threshold: 512  # More aggressive compression
+  max_cache_size: 268435456  # 256MB
+  enable_compression: true
+
+# Performance Settings for high load
+performance:
+  max_concurrent_requests: 25
+  request_rate_limit: 120
+  context_analysis_timeout: 45.0
+  enable_batching: true
+  batch_size: 8
+
+# Security Settings
+security:
+  enable_api_key_rotation: false
+  max_file_size: 5242880  # 5MB for security
+  enable_audit_logging: true
+  allowed_file_extensions:
+    - ".py"
+    - ".js"
+    - ".ts"
+    - ".java"
+    - ".cpp"
+    - ".c"
+    - ".go"
+    - ".rs"
+    - ".rb"
+    - ".php" 
