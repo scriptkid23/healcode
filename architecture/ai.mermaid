@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant User
+    participant ErrorCollector
+    participant FunctionAnalyzer  
+    participant ZoektManager
+    participant ContextSummarizer
+    participant Cache
+    participant AIService
+
+    User->>ErrorCollector: "input undefined error main.js 33:12"
+    ErrorCollector->>Cache: Check cache for similar error
+    alt Cache Hit
+        Cache-->>ErrorCollector: Return cached context
+    else Cache Miss
+        ErrorCollector->>FunctionAnalyzer: Extract function at line 33
+        FunctionAnalyzer-->>ErrorCollector: Function details
+        ErrorCollector->>ZoektManager: Search function usage
+        ZoektManager-->>ErrorCollector: Usage locations (max 10)
+        ErrorCollector->>ContextSummarizer: Summarize large contexts
+        ContextSummarizer-->>ErrorCollector: Optimized context
+        ErrorCollector->>Cache: Store result
+    end
+    ErrorCollector->>AIService: Enhanced context + original error
+    AIService-->>User: Accurate fix suggestions     
