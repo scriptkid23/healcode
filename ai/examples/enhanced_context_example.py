@@ -7,7 +7,7 @@ with comprehensive context including function usage, dependencies, and similar p
 
 import asyncio
 import os
-from ai.services.enhanced_ai_service import EnhancedAIService
+from ai.services.ai_service import AIService
 
 async def main():
     """Demonstrate the enhanced context analysis system"""
@@ -31,7 +31,7 @@ async def main():
     
     # Initialize enhanced AI service
     print("🚀 Initializing Enhanced AI Service...")
-    enhanced_service = EnhancedAIService(
+    enhanced_service = AIService(
         tenant_id=tenant_id,
         redis_url=redis_url,
         model_configs=model_configs,
