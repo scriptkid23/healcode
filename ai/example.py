@@ -51,8 +51,10 @@ async def main():
         print("\nOriginal main.js content (from Zoekt):\n", main_js_code)
 
         # Create error input for enhanced context analysis
-        # Format: "variable_name error_type error file_path line:column"
-        error_input = f"code_analysis general_analysis error {demo_file} 12:3"
+        error_input = (
+            "Uncaught ReferenceError: usernames is not defined "
+            "at update (main.js:10:26) at main.js:33:1 at main.js:21:16"
+        )
         
         # Call the enhanced debug_and_fix_with_context method
         print("\nSending request to Enhanced AI for analysis...")
@@ -78,10 +80,6 @@ async def main():
         else:
             print("\nNo issues found by AI.")
             
-        # Demo enhanced features
-        print("\n" + "="*50)
-        print("ENHANCED AI SERVICE DEMO FEATURES")
-        print("="*50)
         
         # Close the service
         await ai_service.close()
