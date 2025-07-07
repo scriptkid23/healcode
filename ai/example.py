@@ -21,7 +21,7 @@ async def main():
         "google_gemini": {
             "name": "gemini-1.5-flash-latest",
             "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
-            "api_key": os.environ.get("GOOGLE_API_KEY", "AIzaSyBKPHuJidiLJhTRaAFNuuJInHXiwJy7hwk")
+            "api_key": os.environ.get("GOOGLE_API_KEY", "AIzaSyCFlTu-ffPkQyHkh3noVgoXcCGNOgRtif0")
         }
         # Add more models here if needed, e.g., OpenAI
         # "openai": {
@@ -42,16 +42,17 @@ async def main():
     repo_processor = RepoProcessor()
     zoekt = ZoektClient()
 
-    demo_file = "codebase/controls/control-1/main.js"
     main_js_results = await zoekt.search_by_filename("main.js")
     
     if main_js_results:
+        demo_file = "codebase/" + main_js_results[0]["FileName"]
+        print(f"Selected demo_file: {demo_file}")
         main_js_code = main_js_results[0]["Content"]
         print("\nOriginal main.js content (from Zoekt):\n", main_js_code)
 
         # Create error input for enhanced context analysis
         # Format: "variable_name error_type error file_path line:column"
-        error_input = f"code_analysis general_analysis error {demo_file} 1:1"
+        error_input = f"code_analysis general_analysis error {demo_file} 12:3"
         
         # Call the enhanced debug_and_fix_with_context method
         print("\nSending request to Enhanced AI for analysis...")
@@ -81,30 +82,6 @@ async def main():
         print("\n" + "="*50)
         print("ENHANCED AI SERVICE DEMO FEATURES")
         print("="*50)
-        
-        # 1. Chat demo
-        print("\n1. Chat Demo:")
-        chat_response = await ai_service.chat("What are the common JavaScript patterns in this codebase?")
-        print(f"Chat response: {chat_response[:200]}...")
-        
-        # 2. Function analysis demo (if we find functions in the code)
-        print("\n2. Function Analysis Demo:")
-        if "function" in main_js_code.lower():
-            # Try to analyze a function (example with common function name)
-            function_analysis = await ai_service.get_function_usage_analysis("main", demo_file)
-            print(f"Function analysis: {json.dumps(function_analysis, indent=2)}")
-        else:
-            print("No functions found for analysis demo")
-        
-        # 3. Codebase patterns analysis
-        print("\n3. Codebase Patterns Analysis:")
-        patterns_analysis = await ai_service.analyze_codebase_patterns(language="javascript", max_files=5)
-        print(f"Patterns analysis: {json.dumps(patterns_analysis, indent=2)}")
-        
-        # 4. Cache statistics
-        print("\n4. Cache Statistics:")
-        cache_stats = await ai_service.get_cache_statistics()
-        print(f"Cache statistics: {json.dumps(cache_stats, indent=2)}")
         
         # Close the service
         await ai_service.close()
