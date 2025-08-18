@@ -5,9 +5,9 @@ description = "HealCode - Automated Code Improvement System with Git Plugin and 
 authors = ["HealCode Team <team@healcode.com>"]
 readme = "README.md"
 packages = [
+    { include = "ai" },
     {include = "gitplugin"},
-    {include = "editor"},
-    {include = "codebase-indexer", from = "."}
+    {include = "editor"}
 ]
 
 [tool.poetry.dependencies]
@@ -32,6 +32,7 @@ langchain-core = ">=0.2.0"
 langchain-google-genai = ">=1.0.0"
 langchain-openai = ">=0.1.0"
 langchain-anthropic = ">=0.3.0"
+python-dotenv = "^1.1.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
@@ -47,6 +48,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 git-plugin = "gitplugin.api.main:main"
 healcode-editor = "editor.example_usage:main"
+search-proxy = "search_proxy.main:main"
 
 [tool.black]
 line-length = 88

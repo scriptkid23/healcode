@@ -12,7 +12,4 @@ __email__ = "team@gitplugin.com"
 from .core.git_operations import GitOperationsEngine
 from .core.credentials import CredentialsManager
 
-__all__ = [
-    "GitOperationsEngine",
-    "CredentialsManager"
-] 
+__all__ = ["GitOperationsEngine", "CredentialsManager"]

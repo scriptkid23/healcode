@@ -15,9 +15,9 @@ async def main():
     # Model configurations (ensure API keys are set as environment variables or directly)
     model_configs = {
         "google_gemini": {
-            "name": "gemini-1.5-flash-latest",
-            "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
-            "api_key": os.environ.get("GOOGLE_API_KEY", "AIzaSyBKPHuJidiLJhTRaAFNuuJInHXiwJy7hwk")
+            "name": "gemini-2.0-flash",
+            "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+            "api_key": os.environ.get("GOOGLE_API_KEY", "AIzaSyDDrR4KLXDbyWyNB0nAjgUf60T9DeEKUP4")
         }
         # Add more models here if needed, e.g., OpenAI
         # "openai": {
@@ -29,7 +29,7 @@ async def main():
     # Initialize services
     ai_service = AIService(
         tenant_id="tenant1",
-        redis_url="redis://localhost:6380",
+        redis_url="redis://localhost:6379",
         model_configs=model_configs,
         primary_model="google_gemini"
     )

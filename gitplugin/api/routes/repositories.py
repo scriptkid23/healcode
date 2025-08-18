@@ -12,4 +12,4 @@ router = APIRouter()
 @router.get("/")
 async def list_repositories():
     """List repositories"""
-    return {"message": "Repositories endpoint - not implemented yet"} 
+    return {"message": "Repositories endpoint - not implemented yet"}

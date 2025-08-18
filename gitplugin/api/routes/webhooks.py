@@ -18,4 +18,4 @@ async def github_webhook():
 @router.post("/gitlab")
 async def gitlab_webhook():
     """GitLab webhook endpoint"""
-    return {"message": "GitLab webhook endpoint - not implemented yet"} 
+    return {"message": "GitLab webhook endpoint - not implemented yet"}

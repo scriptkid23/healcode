@@ -427,20 +427,20 @@ def main():
     print("\n🔥 Running Basic Editing Demo...")
     asyncio.run(demo_basic_editing())
     
-    # print("\n" + "=" * 60)
-    # print("🔥 Running Pattern Search & Replace Demo...")
-    # asyncio.run(demo_pattern_search_and_replace())
+    print("\n" + "=" * 60)
+    print("🔥 Running Pattern Search & Replace Demo...")
+    asyncio.run(demo_pattern_search_and_replace())
     
-    # print("\n" + "=" * 60)
-    # print("🔥 Running Concurrent Editing Demo...")
-    # asyncio.run(demo_concurrent_editing())
+    print("\n" + "=" * 60)
+    print("🔥 Running Concurrent Editing Demo...")
+    asyncio.run(demo_concurrent_editing())
     
-    # print("\n" + "=" * 60)
-    # print("🔥 Running Advanced AST Editing Demo...")
-    # asyncio.run(demo_advanced_ast_editing())
+    print("\n" + "=" * 60)
+    print("🔥 Running Advanced AST Editing Demo...")
+    asyncio.run(demo_advanced_ast_editing())
     
-    # print("\n" + "=" * 60)
-    # print("🎉 ALL DEMOS COMPLETED!")
+    print("\n" + "=" * 60)
+    print("🎉 ALL DEMOS COMPLETED!")
 
 
 if __name__ == "__main__":

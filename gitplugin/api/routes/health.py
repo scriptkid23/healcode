@@ -23,11 +23,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": "2024-01-01T00:00:00Z",
-        "components": {
-            "api": "healthy",
-            "database": "healthy",
-            "redis": "healthy"
-        }
+        "components": {"api": "healthy", "database": "healthy", "redis": "healthy"},
     }
 
 
@@ -40,4 +36,4 @@ async def readiness_check():
 @router.get("/live")
 async def liveness_check():
     """Liveness check for Kubernetes"""
-    return {"status": "alive"} 
+    return {"status": "alive"}

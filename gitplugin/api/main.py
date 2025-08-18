@@ -33,15 +33,15 @@ git_engine = None
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     global credentials_manager, git_engine
-    
+
     # Startup
     logger.info("Starting Enhanced Git Plugin API...")
     credentials_manager = CredentialsManager()
     git_engine = GitOperationsEngine()
     logger.info("API started successfully with GitPython optimization")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Git Plugin API...")
 
@@ -51,7 +51,7 @@ app = FastAPI(
     title="Enhanced Git Plugin API",
     description="Optimized Git Plugin with advanced GitPython integration",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -124,10 +124,10 @@ def get_git_engine() -> GitOperationsEngine:
 async def health_check():
     """Enhanced health check endpoint"""
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "message": "Enhanced Git Plugin API is running",
         "version": "2.0.0",
-        "features": ["GitPython optimization", "Branch management", "Enhanced status"]
+        "features": ["GitPython optimization", "Branch management", "Enhanced status"],
     }
 
 
@@ -135,7 +135,7 @@ async def health_check():
 @app.post("/credentials")
 async def create_credential(
     credential: CredentialCreate,
-    creds_manager: CredentialsManager = Depends(get_credentials_manager)
+    creds_manager: CredentialsManager = Depends(get_credentials_manager),
 ):
     """Create new credential"""
     try:
@@ -146,22 +146,20 @@ async def create_credential(
             kwargs["username"] = credential.username
         if credential.password:
             kwargs["password"] = credential.password
-        
+
         result = creds_manager.add_credential(
-            credential.name, 
-            credential.type, 
-            **kwargs
+            credential.name, credential.type, **kwargs
         )
-        
+
         return {"status": "success", "credential_name": result}
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/credentials")
 async def list_credentials(
-    creds_manager: CredentialsManager = Depends(get_credentials_manager)
+    creds_manager: CredentialsManager = Depends(get_credentials_manager),
 ):
     """List all credentials"""
     return creds_manager.list_credentials()
@@ -169,8 +167,7 @@ async def list_credentials(
 
 @app.delete("/credentials/{name}")
 async def delete_credential(
-    name: str,
-    creds_manager: CredentialsManager = Depends(get_credentials_manager)
+    name: str, creds_manager: CredentialsManager = Depends(get_credentials_manager)
 ):
     """Delete credential"""
     success = creds_manager.remove_credential(name)
@@ -185,7 +182,7 @@ async def delete_credential(
 async def setup_repository(
     setup: RepositorySetup,
     git_engine: GitOperationsEngine = Depends(get_git_engine),
-    creds_manager: CredentialsManager = Depends(get_credentials_manager)
+    creds_manager: CredentialsManager = Depends(get_credentials_manager),
 ):
     """Setup Git repository with enhanced GitPython"""
     try:
@@ -193,69 +190,59 @@ async def setup_repository(
         credential = creds_manager.get_credential(setup.credential_name)
         if not credential:
             raise HTTPException(status_code=404, detail="Credential not found")
-        
+
         # Setup repository
         workspace_path = await git_engine.setup_repository(
-            setup.repo_url, 
-            credential, 
-            setup.workspace_path
+            setup.repo_url, credential, setup.workspace_path
         )
-        
+
         return {
             "status": "success",
             "message": "Repository setup completed with GitPython optimization",
-            "workspace_path": workspace_path
+            "workspace_path": workspace_path,
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/git/pull")
 async def pull_changes(
-    workspace_path: str,
-    git_engine: GitOperationsEngine = Depends(get_git_engine)
+    workspace_path: str, git_engine: GitOperationsEngine = Depends(get_git_engine)
 ):
     """Pull latest changes with detailed information"""
     try:
         result = await git_engine.pull_changes(workspace_path)
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/git/commit")
 async def commit_changes(
-    commit_req: CommitRequest,
-    git_engine: GitOperationsEngine = Depends(get_git_engine)
+    commit_req: CommitRequest, git_engine: GitOperationsEngine = Depends(get_git_engine)
 ):
     """Commit changes with enhanced file handling"""
     try:
         result = await git_engine.commit_changes(
-            commit_req.workspace_path,
-            commit_req.message,
-            commit_req.files
+            commit_req.workspace_path, commit_req.message, commit_req.files
         )
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/git/push")
 async def push_changes(
-    push_req: PushRequest,
-    git_engine: GitOperationsEngine = Depends(get_git_engine)
+    push_req: PushRequest, git_engine: GitOperationsEngine = Depends(get_git_engine)
 ):
     """Push changes with detailed feedback"""
     try:
-        result = await git_engine.push_changes(
-            push_req.workspace_path,
-            push_req.branch
-        )
+        result = await git_engine.push_changes(push_req.workspace_path, push_req.branch)
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -264,7 +251,7 @@ async def push_changes(
 async def create_pull_request(
     pr_req: PullRequestCreate,
     git_engine: GitOperationsEngine = Depends(get_git_engine),
-    creds_manager: CredentialsManager = Depends(get_credentials_manager)
+    creds_manager: CredentialsManager = Depends(get_credentials_manager),
 ):
     """Create pull request"""
     try:
@@ -272,7 +259,7 @@ async def create_pull_request(
         credential = creds_manager.get_credential(pr_req.credential_name)
         if not credential:
             raise HTTPException(status_code=404, detail="Credential not found")
-        
+
         # Create PR
         result = await git_engine.create_pull_request(
             pr_req.repo_url,
@@ -280,25 +267,24 @@ async def create_pull_request(
             pr_req.source_branch,
             pr_req.target_branch,
             pr_req.title,
-            pr_req.description
+            pr_req.description,
         )
-        
+
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/git/status")
 async def get_repository_status(
-    workspace_path: str,
-    git_engine: GitOperationsEngine = Depends(get_git_engine)
+    workspace_path: str, git_engine: GitOperationsEngine = Depends(get_git_engine)
 ):
     """Get comprehensive repository status"""
     try:
         result = await git_engine.get_repository_status(workspace_path)
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -306,18 +292,15 @@ async def get_repository_status(
 # Branch management endpoints
 @app.post("/git/branch/create")
 async def create_branch(
-    branch_req: BranchRequest,
-    git_engine: GitOperationsEngine = Depends(get_git_engine)
+    branch_req: BranchRequest, git_engine: GitOperationsEngine = Depends(get_git_engine)
 ):
     """Create new branch"""
     try:
         result = await git_engine.create_branch(
-            branch_req.workspace_path,
-            branch_req.branch_name,
-            branch_req.checkout
+            branch_req.workspace_path, branch_req.branch_name, branch_req.checkout
         )
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -325,16 +308,15 @@ async def create_branch(
 @app.post("/git/branch/switch")
 async def switch_branch(
     switch_req: BranchSwitchRequest,
-    git_engine: GitOperationsEngine = Depends(get_git_engine)
+    git_engine: GitOperationsEngine = Depends(get_git_engine),
 ):
     """Switch to existing branch"""
     try:
         result = await git_engine.switch_branch(
-            switch_req.workspace_path,
-            switch_req.branch_name
+            switch_req.workspace_path, switch_req.branch_name
         )
         return result
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -351,7 +333,7 @@ async def complete_git_workflow(
     pr_title: Optional[str] = None,
     pr_description: Optional[str] = None,
     git_engine: GitOperationsEngine = Depends(get_git_engine),
-    creds_manager: CredentialsManager = Depends(get_credentials_manager)
+    creds_manager: CredentialsManager = Depends(get_credentials_manager),
 ):
     """Complete workflow: setup -> create branch -> commit -> push -> create PR"""
     try:
@@ -359,39 +341,46 @@ async def complete_git_workflow(
         credential = creds_manager.get_credential(credential_name)
         if not credential:
             raise HTTPException(status_code=404, detail="Credential not found")
-        
+
         workflow_results = []
-        
+
         # 1. Setup repository
-        setup_result = await git_engine.setup_repository(repo_url, credential, workspace_path)
+        setup_result = await git_engine.setup_repository(
+            repo_url, credential, workspace_path
+        )
         workflow_results.append({"step": "setup", "result": setup_result})
-        
+
         # 2. Create and switch to feature branch
-        branch_result = await git_engine.create_branch(workspace_path, branch_name, True)
+        branch_result = await git_engine.create_branch(
+            workspace_path, branch_name, True
+        )
         workflow_results.append({"step": "create_branch", "result": branch_result})
-        
+
         # 3. Commit changes (if any)
         commit_result = await git_engine.commit_changes(workspace_path, commit_message)
         workflow_results.append({"step": "commit", "result": commit_result})
-        
+
         # 4. Push changes
         push_result = await git_engine.push_changes(workspace_path, branch_name)
         workflow_results.append({"step": "push", "result": push_result})
-        
+
         # 5. Create Pull Request
         pr_result = await git_engine.create_pull_request(
-            repo_url, credential, branch_name, target_branch,
+            repo_url,
+            credential,
+            branch_name,
+            target_branch,
             pr_title or f"Feature: {branch_name}",
-            pr_description or f"Automated PR for {branch_name}"
+            pr_description or f"Automated PR for {branch_name}",
         )
         workflow_results.append({"step": "pull_request", "result": pr_result})
-        
+
         return {
             "status": "success",
             "message": "Complete Git workflow executed successfully",
-            "workflow_steps": workflow_results
+            "workflow_steps": workflow_results,
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -400,17 +389,15 @@ async def complete_git_workflow(
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error(f"Global exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 def main():
     """Main entry point for Poetry script"""
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
-    main() 
+    main()

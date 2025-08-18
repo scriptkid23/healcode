@@ -12,4 +12,4 @@ router = APIRouter()
 @router.get("/")
 async def list_jobs():
     """List jobs"""
-    return {"message": "Jobs endpoint - not implemented yet"} 
+    return {"message": "Jobs endpoint - not implemented yet"}

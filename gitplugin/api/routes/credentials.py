@@ -12,4 +12,4 @@ router = APIRouter()
 @router.get("/")
 async def list_credentials():
     """List credentials"""
-    return {"message": "Credentials endpoint - not implemented yet"} 
+    return {"message": "Credentials endpoint - not implemented yet"}
