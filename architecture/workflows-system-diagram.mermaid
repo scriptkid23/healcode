@@ -1,0 +1,103 @@
+graph TB
+    subgraph "AI Workflows Module - Error Analysis System"
+        
+        subgraph "Input Layer"
+            ERROR_INPUT["🔴 Error Input<br/>ReferenceError: usernames is not defined<br/>at main.js:10:26"]
+        end
+        
+        subgraph "LangGraph Workflow Engine"
+            direction TB
+            
+            NODE1["📝 Node 1: Parse Error<br/>━━━━━━━━━━━━━━━<br/>• Parse error message<br/>• Extract structured info<br/>• Security sanitization<br/>• Cache check"]
+            
+            NODE2["🔍 Node 2: Parse File<br/>━━━━━━━━━━━━━━━<br/>• Read target file<br/>• Multi-language parsing<br/>• Extract function context<br/>• Memory monitoring"]
+            
+            NODE3["🔗 Node 3: Find Dependencies<br/>━━━━━━━━━━━━━━━<br/>• Search imports<br/>• Find function usages<br/>• Analyze dependencies<br/>• Build dependency graph"]
+            
+            NODE4["🤖 Node 4: Analyze Impact<br/>━━━━━━━━━━━━━━━<br/>• Load few-shot examples<br/>• Format context for LLM<br/>• Call AI model<br/>• Generate fix suggestions"]
+            
+            NODE1 --> NODE2
+            NODE2 --> NODE3
+            NODE3 --> NODE4
+        end
+        
+        subgraph "Core Components"
+            direction LR
+            
+            CONFIG["⚙️ WorkflowConfig<br/>━━━━━━━━━━━━<br/>• SecurityConfig<br/>• PerformanceConfig<br/>• LanguageConfig<br/>• MetricsConfig"]
+            
+            STATE["📊 AnalysisState<br/>━━━━━━━━━━━━<br/>• ErrorInfo<br/>• FunctionContext<br/>• Dependencies<br/>• ImpactAnalysis"]
+            
+            PARSERS["🔧 Multi-Language Parsers<br/>━━━━━━━━━━━━<br/>• PythonASTParser<br/>• TreeSitterParser<br/>• RegexParser (fallback)"]
+            
+            ZOEKT["🔍 Enhanced Zoekt Manager<br/>━━━━━━━━━━━━<br/>• Import detection<br/>• Function search<br/>• Dependency analysis"]
+            
+            FEWSHOT["📚 Few-Shot Examples<br/>━━━━━━━━━━━━<br/>• Error patterns<br/>• Fix examples<br/>• Example selection"]
+        end
+        
+        subgraph "External Services"
+            direction TB
+            
+            REDIS[("💾 Redis Cache<br/>━━━━━━━━━━━━<br/>• Parse results<br/>• Dependencies<br/>• LLM responses")]
+            
+            ZOEKT_SERVER[("🔎 Zoekt Search<br/>━━━━━━━━━━━━<br/>• Code search<br/>• Pattern matching<br/>• File indexing")]
+            
+            LLM[("🧠 LLM Services<br/>━━━━━━━━━━━━<br/>• Google Gemini<br/>• OpenAI GPT-4<br/>• Anthropic Claude")]
+        end
+        
+        subgraph "Output Layer"
+            OUTPUT["📤 JSON Output<br/>━━━━━━━━━━━━━━━<br/>✓ Error analysis<br/>✓ Function context<br/>✓ Dependencies<br/>✓ Fix suggestions<br/>✓ Impact analysis<br/>✓ Metrics"]
+        end
+        
+        %% Connections to components
+        ERROR_INPUT --> NODE1
+        CONFIG -.-> NODE1
+        CONFIG -.-> NODE2
+        CONFIG -.-> NODE3
+        CONFIG -.-> NODE4
+        
+        NODE1 --> STATE
+        NODE2 --> STATE
+        NODE3 --> STATE
+        NODE4 --> STATE
+        STATE --> OUTPUT
+        
+        NODE2 --> PARSERS
+        NODE3 --> ZOEKT
+        NODE4 --> FEWSHOT
+        
+        %% Cache connections
+        NODE1 <-.cache.-> REDIS
+        NODE2 <-.cache.-> REDIS
+        NODE3 <-.cache.-> REDIS
+        NODE4 <-.cache.-> REDIS
+        
+        %% External service connections
+        NODE3 --> ZOEKT_SERVER
+        NODE4 --> LLM
+        
+    end
+    
+    subgraph "Integration with Other Modules"
+        direction LR
+        
+        EDITOR["📝 Editor Service<br/>Apply code fixes"]
+        GIT["🔧 Git Plugin<br/>Create PRs"]
+        API["🌐 API Service<br/>Queue management"]
+        
+        OUTPUT --> EDITOR
+        EDITOR --> GIT
+        API -.trigger.-> ERROR_INPUT
+    end
+    
+    %% Styling
+    classDef nodeClass fill:#4A90E2,stroke:#2E5C8A,stroke-width:2px,color:#fff
+    classDef componentClass fill:#50C878,stroke:#2E7D57,stroke-width:2px,color:#fff
+    classDef serviceClass fill:#9B59B6,stroke:#6C3483,stroke-width:2px,color:#fff
+    classDef outputClass fill:#E67E22,stroke:#A04000,stroke-width:2px,color:#fff
+    
+    class NODE1,NODE2,NODE3,NODE4 nodeClass
+    class CONFIG,STATE,PARSERS,ZOEKT,FEWSHOT componentClass
+    class REDIS,ZOEKT_SERVER,LLM serviceClass
+    class OUTPUT outputClass
+
