@@ -9,8 +9,6 @@ __author__ = "AI Service Team"
 __email__ = "team@aiservice.com"
 
 from .services.ai_service import AIService
-import os
-from dotenv import load_dotenv
 
 __all__ = [
     "AIService"

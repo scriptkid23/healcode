@@ -6,31 +6,27 @@ sys.path.append(os.getcwd())
 from ai.services.ai_service import AIService
 from ai.core.repo_processor import RepoProcessor
 from indexer.zoekt_client import ZoektClient
-import os
 from editor.service import EditorService, EditorConfig
 from editor.interfaces import EditOptions
 import json
+from dotenv import load_dotenv
+load_dotenv()
 
 async def main():
     # Model configurations (ensure API keys are set as environment variables or directly)
     model_configs = {
-        "google_gemini": {
-            "name": "gemini-2.0-flash",
-            "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-            "api_key": os.environ.get("GOOGLE_API_KEY", "AIzaSyDDrR4KLXDbyWyNB0nAjgUf60T9DeEKUP4")
+        os.getenv("AI_NAME"): {
+            "name": os.getenv("AI_MODEL"),   # bạn đang nhầm AI_API_KEY với model name
+            "endpoint": os.getenv("END_POINT"),
+            "api_key": os.getenv("AI_API_KEY")
         }
-        # Add more models here if needed, e.g., OpenAI
-        # "openai": {
-        #     "name": "gpt-4",
-        #     "api_key": os.environ.get("OPENAI_API_KEY", "your-openai-api-key")
-        # }
     }
 
     # Initialize services
     ai_service = AIService(
         tenant_id="tenant1",
         redis_url="redis://localhost:6379",
-        model_configs=model_configs,
+        model_configs=model_configs, # type: ignore
         primary_model="google_gemini"
     )
     repo_processor = RepoProcessor()
