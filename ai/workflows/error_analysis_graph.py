@@ -6,19 +6,29 @@ with security, caching, retry mechanisms, and multi-language support.
 """
 
 import asyncio
+import os
 import time
 import uuid
 import json
 import re
-from typing import Dict, Any, Optional, List
+import warnings
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import psutil
 import traceback
 
+USING_MOCK_LANGGRAPH = False
+
 try:
     from langgraph import StateGraph, END
-    from langgraph.graph import Graph
 except ImportError:
+    USING_MOCK_LANGGRAPH = True
+    warnings.warn(
+        "LangGraph not installed; falling back to mock implementation. "
+        "Install langgraph via `pip install langgraph` for production use.",
+        RuntimeWarning,
+    )
+
     # Fallback for development - create mock classes
     class StateGraph:
         def __init__(self, state_schema=None):
@@ -64,43 +74,138 @@ from ai.workflows.config import WorkflowConfig
 from ai.workflows.enhanced_parsers import MultiLanguageFunctionAnalyzer
 from ai.workflows.enhanced_zoekt_manager import EnhancedZoektSearchManager
 from ai.workflows.few_shot_examples import FewShotExampleManager
-from ai.core.error_context_collector import ErrorContextCollector
-from ai.core.cache_manager import CacheManager
+from ai.core.error_context_collector import ErrorInfo
 from ai.services.ai_service import AIService
 from indexer.zoekt_client import ZoektClient
 
+class ErrorInputParser:
+    """Parse raw error strings into structured ErrorInfo objects."""
+
+    _PATTERN_VARIABLE_ERROR = re.compile(r"(\w+)\s+(\w+)\s+error\s+([^\s]+)\s+(\d+):(\d+)")
+    _PATTERN_LOCATION_ERROR = re.compile(r"([^\s:]+):(\d+):(\d+)\s*-\s*.*?(\w+)")
+    _PATTERN_STACK_ERROR = re.compile(r"(\w+Error):\s*.*?\s+at\s+([^\s:]+):(\d+):(\d+)")
+    _PATTERN_FILE = re.compile(r"([^\s:]+\.[a-zA-Z]+)")
+    _PATTERN_LINE = re.compile(r":(\d+)")
+
+    def parse(self, error_input: str) -> ErrorInfo:
+        """Parse a raw error string into ErrorInfo."""
+        match = self._PATTERN_VARIABLE_ERROR.search(error_input)
+        if match:
+            return ErrorInfo(
+                variable_or_symbol=match.group(1),
+                error_type=match.group(2),
+                file_path=match.group(3),
+                line_number=int(match.group(4)),
+                column_number=int(match.group(5)),
+            )
+
+        match = self._PATTERN_LOCATION_ERROR.search(error_input)
+        if match:
+            return ErrorInfo(
+                file_path=match.group(1),
+                line_number=int(match.group(2)),
+                column_number=int(match.group(3)),
+                error_type=match.group(4),
+                variable_or_symbol="",
+            )
+
+        match = self._PATTERN_STACK_ERROR.search(error_input)
+        if match:
+            return ErrorInfo(
+                error_type=match.group(1),
+                file_path=match.group(2),
+                line_number=int(match.group(3)),
+                column_number=int(match.group(4)),
+                variable_or_symbol="",
+            )
+
+        file_match = self._PATTERN_FILE.search(error_input)
+        line_match = self._PATTERN_LINE.search(error_input)
+        if file_match and line_match:
+            return ErrorInfo(
+                file_path=file_match.group(1),
+                line_number=int(line_match.group(1)),
+                error_type="unknown",
+                variable_or_symbol="",
+            )
+
+        raise ValueError(f"Unable to parse error input: {error_input}")
+
+
 class SecurityManager:
-    """Handles security aspects of the workflow"""
+    """Handles security aspects of the workflow."""
     
     def __init__(self, config: WorkflowConfig):
-        self.config = config
-        self.sensitive_patterns = config.security.sensitive_patterns
-        self.redaction_placeholder = config.security.redaction_placeholder
+        self.config = config.security
+        self._compiled_patterns = [
+            re.compile(pattern, re.IGNORECASE)
+            for pattern in self.config.sensitive_patterns
+        ]
     
-    def sanitize_content(self, content: str) -> tuple[str, Dict[str, str]]:
+    def sanitize_content(self, content: str) -> Tuple[str, Dict[str, str]]:
         """
-        Sanitize content by redacting sensitive information
+        Sanitize content by redacting sensitive information.
         
         Returns:
             Tuple of (sanitized_content, redaction_mapping)
         """
-        redactions = {}
+        if not content:
+            return content, {}
+        
+        redactions: Dict[str, str] = {}
         sanitized = content
         
-        for pattern in self.sensitive_patterns:
-            matches = re.finditer(pattern, content, re.IGNORECASE)
-            for match in matches:
+        for idx, pattern in enumerate(self._compiled_patterns):
+            for match in pattern.finditer(sanitized):
                 original = match.group(0)
-                redacted_key = f"REDACTED_{len(redactions)}"
-                redactions[redacted_key] = original
-                sanitized = sanitized.replace(original, f"{self.redaction_placeholder}_{redacted_key}")
+                placeholder = f"{self.config.redaction_placeholder}_{idx}_{len(redactions)}"
+                redactions[placeholder] = original
+                sanitized = sanitized.replace(original, placeholder)
         
         return sanitized, redactions
     
     def check_memory_usage(self) -> float:
-        """Check current memory usage in MB"""
-        process = psutil.Process()
-        return process.memory_info().rss / 1024 / 1024
+        """Check current memory usage in MB and enforce configured limit."""
+        memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
+        if memory_mb > self.config.max_memory_mb:
+            raise MemoryError(
+                f"Memory usage ({memory_mb:.1f}MB) exceeds limit "
+                f"({self.config.max_memory_mb}MB)"
+            )
+        return memory_mb
+
+
+class WorkflowCacheManager:
+    """Lightweight in-memory cache with TTL for workflow artifacts."""
+
+    def __init__(self, ttl_seconds: int, max_entries: int = 2048):
+        self.ttl_seconds = max(1, ttl_seconds)
+        self.max_entries = max_entries
+        self._store: Dict[str, Tuple[Any, float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def get(self, key: str) -> Optional[Any]:
+        """Return cached value if present and not expired."""
+        async with self._lock:
+            entry = self._store.get(key)
+            if not entry:
+                return None
+
+            value, expires_at = entry
+            if expires_at < time.time():
+                self._store.pop(key, None)
+                return None
+            return value
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Store value with TTL, evicting the oldest entry if capacity exceeded."""
+        async with self._lock:
+            expires_at = time.time() + (ttl or self.ttl_seconds)
+            self._store[key] = (value, expires_at)
+
+            if len(self._store) > self.max_entries:
+                oldest_key = min(self._store.items(), key=lambda item: item[1][1])[0]
+                self._store.pop(oldest_key, None)
 
 class MetricsCollector:
     """Collects and manages workflow metrics"""
@@ -162,22 +267,19 @@ class ErrorAnalysisWorkflow:
     
     def __init__(self, config: WorkflowConfig):
         self.config = config
+        self._retry_state_key = "_retry_counts"
+        
+        self._validate_langgraph_usage()
         
         # Initialize components
         self.security_manager = SecurityManager(config)
         self.metrics_collector = MetricsCollector(config)
-        self.cache_manager = CacheManager(config.performance.cache_ttl_seconds)
+        self.cache_manager = WorkflowCacheManager(config.performance.cache_ttl_seconds)
         self.few_shot_manager = FewShotExampleManager(config.few_shot_examples_path)
+        self.error_parser = ErrorInputParser()
         
-        # Initialize core services
-        self.error_collector = ErrorContextCollector()
-        
-        # Initialize AI service
-        self.ai_service = AIService(
-            model_name=config.primary_model,
-            temperature=config.model_temperature,
-            max_tokens=config.max_tokens
-        )
+        # Initialize AI service with validation/fallback
+        self.ai_service: Optional[AIService] = self._initialize_ai_service(config)
         
         # Initialize search and parsing services (will be set up in setup method)
         self.zoekt_manager: Optional[EnhancedZoektSearchManager] = None
@@ -186,6 +288,72 @@ class ErrorAnalysisWorkflow:
         # Create the graph
         self.graph = self._create_graph()
         self.compiled_graph = self.graph.compile()
+        self._node_registry = {
+            "parse_error": self._parse_error_node,
+            "parse_file": self._parse_file_node,
+            "find_dependencies": self._find_dependencies_node,
+            "analyze_impact": self._analyze_impact_node,
+        }
+
+    def _validate_langgraph_usage(self) -> None:
+        """Ensure we are not accidentally running with the mock graph."""
+        allow_mock = getattr(self.config, "allow_mock_langgraph", True)
+        if USING_MOCK_LANGGRAPH and not allow_mock:
+            raise RuntimeError(
+                "LangGraph is not installed and mock usage is disabled. "
+                "Install langgraph (`pip install langgraph`) or set "
+                "`allow_mock_langgraph=True` in WorkflowConfig for development."
+            )
+
+    def _initialize_ai_service(self, config: WorkflowConfig) -> Optional[AIService]:
+        """Initialize AI service with validation and graceful fallback."""
+        valid_models = {"google_gemini", "openai", "anthropic"}
+        env_var_mapping = {
+            "google_gemini": "GOOGLE_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+        }
+        
+        try:
+            if config.primary_model not in valid_models:
+                raise ValueError(
+                    f"Invalid model: {config.primary_model}. "
+                    f"Supported models: {sorted(valid_models)}"
+                )
+            
+            env_var = env_var_mapping.get(config.primary_model)
+            api_key = config.ai_api_key or (os.environ.get(env_var) if env_var else None)
+            if not api_key:
+                raise ValueError(
+                    f"Missing API key for primary model '{config.primary_model}'. "
+                    f"Set `ai_api_key` in WorkflowConfig or export {env_var}."
+                )
+            
+            model_config = {
+                config.primary_model: {
+                    "name": config.ai_model,
+                    "endpoint": config.ai_endpoint,
+                    "api_key": api_key,
+                }
+            }
+            
+            return AIService(
+                tenant_id=config.tenant_id,
+                redis_url=config.redis_url,
+                model_configs=model_config,
+                primary_model=config.primary_model,
+            )
+        except Exception as exc:
+            if config.enable_llm_fallback:
+                warnings.warn(
+                    f"Failed to initialize AI service: {exc}. "
+                    "Continuing with fallback analysis only.",
+                    RuntimeWarning,
+                )
+                return None
+            raise RuntimeError(
+                "Failed to initialize AI service and fallback is disabled."
+            ) from exc
     
     def setup(self, zoekt_client: ZoektClient):
         """Setup the workflow with required dependencies"""
@@ -273,8 +441,9 @@ class ErrorAnalysisWorkflow:
         """
         Node 1: Parse the error message and extract structured information
         """
-        node_context = self.metrics_collector.record_node_start("parse_error", state)
-        retry_count = 0
+        node_name = "parse_error"
+        node_context = self.metrics_collector.record_node_start(node_name, state)
+        retry_count = self._get_retry_count(state, node_name)
         
         try:
             # Check cache first
@@ -287,7 +456,7 @@ class ErrorAnalysisWorkflow:
                 node_context['cache_hit'] = True
             else:
                 # Parse the error
-                parsed_error = self.error_collector.parse_error_input(state['raw_error'])
+                parsed_error = self.error_parser.parse(state['raw_error'])
                 
                 # Sanitize sensitive information
                 if parsed_error and parsed_error.context:
@@ -308,20 +477,22 @@ class ErrorAnalysisWorkflow:
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
+            self._reset_retry_count(state, node_name)
             
             return state
             
         except Exception as e:
             return await self._handle_node_error(
-                state, "parse_error", str(e), node_context, retry_count
+                state, node_name, str(e), node_context
             )
     
     async def _parse_file_node(self, state: AnalysisState) -> AnalysisState:
         """
         Node 2: Parse the target file and extract function context
         """
-        node_context = self.metrics_collector.record_node_start("parse_file", state)
-        retry_count = 0
+        node_name = "parse_file"
+        node_context = self.metrics_collector.record_node_start(node_name, state)
+        retry_count = self._get_retry_count(state, node_name)
         
         try:
             if not state['parsed_error']:
@@ -381,20 +552,22 @@ class ErrorAnalysisWorkflow:
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
+            self._reset_retry_count(state, node_name)
             
             return state
             
         except Exception as e:
             return await self._handle_node_error(
-                state, "parse_file", str(e), node_context, retry_count
+                state, node_name, str(e), node_context
             )
     
     async def _find_dependencies_node(self, state: AnalysisState) -> AnalysisState:
         """
         Node 3: Find file dependencies and import relationships
         """
-        node_context = self.metrics_collector.record_node_start("find_dependencies", state)
-        retry_count = 0
+        node_name = "find_dependencies"
+        node_context = self.metrics_collector.record_node_start(node_name, state)
+        retry_count = self._get_retry_count(state, node_name)
         
         try:
             if not state['parsed_error']:
@@ -451,20 +624,22 @@ class ErrorAnalysisWorkflow:
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
+            self._reset_retry_count(state, node_name)
             
             return state
             
         except Exception as e:
             return await self._handle_node_error(
-                state, "find_dependencies", str(e), node_context, retry_count
+                state, node_name, str(e), node_context
             )
     
     async def _analyze_impact_node(self, state: AnalysisState) -> AnalysisState:
         """
         Node 4: Analyze impact using LLM with few-shot examples
         """
-        node_context = self.metrics_collector.record_node_start("analyze_impact", state)
-        retry_count = 0
+        node_name = "analyze_impact"
+        node_context = self.metrics_collector.record_node_start(node_name, state)
+        retry_count = self._get_retry_count(state, node_name)
         
         try:
             # Prepare context for LLM
@@ -501,9 +676,12 @@ class ErrorAnalysisWorkflow:
                 
                 full_prompt = f"{few_shot_prompt.system_prompt}\n\n{formatted_examples}\n\n{user_prompt}"
                 
-                # Call LLM
+                # Call LLM if available, otherwise fallback immediately
                 try:
-                    llm_response = await self.ai_service.generate_response(full_prompt)
+                    if not self.ai_service:
+                        raise RuntimeError("AI service unavailable")
+                    
+                    llm_response = await self.ai_service.chat(full_prompt)
                     
                     # Parse LLM response as JSON
                     try:
@@ -536,12 +714,13 @@ class ErrorAnalysisWorkflow:
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
+            self._reset_retry_count(state, node_name)
             
             return state
             
         except Exception as e:
             return await self._handle_node_error(
-                state, "analyze_impact", str(e), node_context, retry_count
+                state, node_name, str(e), node_context
             )
     
     def _prepare_llm_context(self, state: AnalysisState) -> Dict[str, Any]:
@@ -607,39 +786,59 @@ class ErrorAnalysisWorkflow:
             test_recommendations=["Add unit tests to verify the fix"],
             confidence_score=0.5
         )
+
+    def _get_retry_count(self, state: AnalysisState, node_name: str) -> int:
+        """Return current retry count for a node."""
+        retry_map = state.setdefault(self._retry_state_key, {})
+        return retry_map.get(node_name, 0)
+
+    def _increment_retry_count(self, state: AnalysisState, node_name: str) -> int:
+        """Increment and return retry count for a node."""
+        retry_map = state.setdefault(self._retry_state_key, {})
+        retry_map[node_name] = retry_map.get(node_name, 0) + 1
+        return retry_map[node_name]
+
+    def _reset_retry_count(self, state: AnalysisState, node_name: str) -> None:
+        """Clear retry count for a node after success or terminal failure."""
+        retry_map = state.get(self._retry_state_key)
+        if retry_map and node_name in retry_map:
+            retry_map.pop(node_name, None)
     
     async def _handle_node_error(self, 
                                 state: AnalysisState, 
                                 node_name: str, 
                                 error_message: str,
-                                node_context: Dict[str, Any],
-                                retry_count: int) -> AnalysisState:
+                                node_context: Dict[str, Any]) -> AnalysisState:
         """Handle node execution errors with retry logic"""
         
+        current_retry = self._get_retry_count(state, node_name)
+        
         # Check if we should retry
-        if retry_count < self.config.max_retries_per_node:
-            state['warnings'].append(f"Node {node_name} failed (attempt {retry_count + 1}): {error_message}")
+        if current_retry < self.config.max_retries_per_node:
+            attempt_number = current_retry + 1
+            state['warnings'].append(
+                f"Node {node_name} failed (attempt {attempt_number}): {error_message}"
+            )
             
             # Implement retry with exponential backoff
-            wait_time = 2 ** retry_count
+            wait_time = 2 ** current_retry
             await asyncio.sleep(wait_time)
+            self._increment_retry_count(state, node_name)
             
-            # Retry the node
-            if node_name == "parse_error":
-                return await self._parse_error_node(state)
-            elif node_name == "parse_file":
-                return await self._parse_file_node(state)
-            elif node_name == "find_dependencies":
-                return await self._find_dependencies_node(state)
-            elif node_name == "analyze_impact":
-                return await self._analyze_impact_node(state)
+            node_func = self._node_registry.get(node_name)
+            if not node_func:
+                raise ValueError(f"Unknown node '{node_name}' for retry")
+            return await node_func(state)
         
         # Max retries reached or no retry configured
-        state['error'] = f"Node {node_name} failed after {retry_count + 1} attempts: {error_message}"
+        state['error'] = (
+            f"Node {node_name} failed after {current_retry + 1} attempts: {error_message}"
+        )
         
         # Record failure metrics
-        metrics = self.metrics_collector.record_node_end(node_context, state, False, retry_count)
+        metrics = self.metrics_collector.record_node_end(node_context, state, False, current_retry)
         state['metrics'].node_metrics.append(metrics)
+        self._reset_retry_count(state, node_name)
         
         return state
     

@@ -12,6 +12,7 @@ import threading
 import logging
 
 from .models import FixRequest, FixResponse, TaskInfo, TaskStatus, QueueStats, WorkerInfo
+from .ai import getErrorAnalysisWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class QueueManager:
         self._task_responses: Dict[str, FixResponse] = {}  # request_id -> FixResponse
         
         # Worker management
+        self._error_analysis_workflow = getErrorAnalysisWorkflow()
         self._workers: Dict[str, WorkerInfo] = {}
         self._worker_executor = ThreadPoolExecutor(max_workers=max_workers)
         self._running = False
@@ -131,6 +133,7 @@ class QueueManager:
             priority=request.priority,
             metadata=request.metadata
         )
+        # self._error_analysis_workflow.
         
         # Store task and add to queue
         with self._lock:

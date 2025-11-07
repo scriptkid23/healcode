@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain.schema import Document
+from langchain_core.documents import Document
 import asyncio
 
 from ai.prompts.code_analysis import CodeFix, CODE_FIX_PROMPT_TEMPLATE

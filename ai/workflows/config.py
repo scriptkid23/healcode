@@ -67,9 +67,17 @@ class WorkflowConfig:
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     language: LanguageConfig = field(default_factory=LanguageConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    allow_mock_langgraph: bool = True
     
     # LLM Configuration
+    tenant_id: str = "tenant1"
+    redis_url: str = "redis://localhost:6380"
+    # Model Config
     primary_model: str = "google_gemini"
+    ai_model: str = "gemini-2.0-flash"
+    ai_endpoint: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    ai_api_key: str = "AIzaSyDDrR4KLXDbyWyNB0nAjgUf60T9DeEKUP4"
+
     model_temperature: float = 0.1  # Low temperature for consistent results
     max_tokens: int = 2048
     
@@ -156,6 +164,7 @@ class WorkflowConfig:
             'max_retries_per_node': self.max_retries_per_node,
             'enable_llm_fallback': self.enable_llm_fallback,
             'enable_simple_fallback': self.enable_simple_fallback,
+            'allow_mock_langgraph': self.allow_mock_langgraph,
             'enable_few_shot': self.enable_few_shot,
             'few_shot_examples_path': self.few_shot_examples_path
         }
