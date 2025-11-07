@@ -5,9 +5,9 @@ description = "HealCode - Automated Code Improvement System with Git Plugin and 
 authors = ["HealCode Team <team@healcode.com>"]
 readme = "README.md"
 packages = [
+    { include = "ai" },
     {include = "gitplugin"},
-    {include = "editor"},
-    {include = "codebase-indexer", from = "."}
+    {include = "editor"}
 ]
 
 [tool.poetry.dependencies]

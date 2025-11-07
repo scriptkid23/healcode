@@ -8,6 +8,13 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+primary_model_name = os.getenv("AI_NAME")
+ai_model_name = os.getenv("AI_MODEL")
+ai_endpoint = os.getenv("END_POINT")
+ai_api_key = os.getenv("AI_API_KEY")
 
 @dataclass
 class SecurityConfig:
@@ -71,12 +78,12 @@ class WorkflowConfig:
     
     # LLM Configuration
     tenant_id: str = "tenant1"
-    redis_url: str = "redis://localhost:6380"
+    redis_url: str = "redis://localhost:6379"
     # Model Config
-    primary_model: str = "google_gemini"
-    ai_model: str = "gemini-2.0-flash"
-    ai_endpoint: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-    ai_api_key: str = "AIzaSyDDrR4KLXDbyWyNB0nAjgUf60T9DeEKUP4"
+    primary_model: str = primary_model_name
+    ai_model: str = ai_model_name
+    ai_endpoint: str = ai_endpoint
+    ai_api_key: str = ai_api_key
 
     model_temperature: float = 0.1  # Low temperature for consistent results
     max_tokens: int = 2048

@@ -133,7 +133,8 @@ class QueueManager:
             priority=request.priority,
             metadata=request.metadata
         )
-        # self._error_analysis_workflow.
+        test = await self._error_analysis_workflow.run_analysis(request.trace_error, "./codebase/content.js")
+        print(test)
         
         # Store task and add to queue
         with self._lock:

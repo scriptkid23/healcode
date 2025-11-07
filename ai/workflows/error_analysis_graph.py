@@ -90,6 +90,7 @@ class ErrorInputParser:
     def parse(self, error_input: str) -> ErrorInfo:
         """Parse a raw error string into ErrorInfo."""
         match = self._PATTERN_VARIABLE_ERROR.search(error_input)
+        print(match)
         if match:
             return ErrorInfo(
                 variable_or_symbol=match.group(1),
@@ -454,21 +455,27 @@ class ErrorAnalysisWorkflow:
                 state['parsed_error'] = cached_result
                 state['cache_hits'] += 1
                 node_context['cache_hit'] = True
+                print(123)
             else:
+                print(state['raw_error'])
                 # Parse the error
                 parsed_error = self.error_parser.parse(state['raw_error'])
+                print(parsed_error)
                 
                 # Sanitize sensitive information
-                if parsed_error and parsed_error.context:
+                if parsed_error and hasattr(parsed_error, 'context') and parsed_error.context:
+                    print(2342)
                     sanitized_context, redactions = self.security_manager.sanitize_content(parsed_error.context)
                     parsed_error.context = sanitized_context
                     
                     if redactions:
                         state['sensitive_data_detected'] = True
                         state['sanitized_content'].update(redactions)
+                print(345)
                 
                 state['parsed_error'] = parsed_error
                 state['cache_misses'] += 1
+                print(456)
                 
                 # Cache the result
                 await self.cache_manager.set(cache_key, parsed_error)
