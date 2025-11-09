@@ -166,7 +166,7 @@ class TreeSitterParser(SandboxedParser):
         
     def _get_parser(self):
         """Get or create tree-sitter parser for the language"""
-        if self._parser is None:
+        if self._parser.language is None:
             try:
                 # Language-specific parser setup
                 if self.language == 'java':
@@ -194,6 +194,7 @@ class TreeSitterParser(SandboxedParser):
     def _create_javascript_parser(self):
         """Create JavaScript tree-sitter parser"""
         # This would be implemented with actual tree-sitter JavaScript grammar
+        print(12345)
         try:
             import tree_sitter_javascript as js
             parser = Parser(Language(js.language()))
@@ -218,7 +219,6 @@ class TreeSitterParser(SandboxedParser):
             
             parser = self._get_parser()
             tree = parser.parse(bytes(file_content, 'utf-8'))
-            
             return TreeSitterParseResult(tree, file_content, file_path, self.language)
             
         except Exception as e:
@@ -237,10 +237,254 @@ class TreeSitterParseResult:
         self.lines = content.split('\n')
         
     def get_function_at_line(self, line_number: int) -> Optional[FunctionContext]:
-        """Find function containing the specified line (placeholder implementation)"""
-        # This would use tree-sitter query to find function nodes
-        # For now, we'll return None to trigger fallback
-        return None
+        """
+        Return a FunctionContext for the smallest function-like node that contains
+        the given 1-based line_number. If nothing is found, return None.
+
+        Works best for JavaScript/TypeScript/JSX/TSX (and reasonable for others).
+        Extracts: name, signature, implementation (full source slice), start/end lines,
+        file_path, language, documentation (leading comments), and parameters (list).
+        """
+        if not self.tree or not self.content:
+            return None
+        if line_number < 1 or line_number > len(self.lines):
+            return None
+
+        # -------------------- helpers --------------------
+        def _point_for_line(ln: int):
+            # Tree-sitter points are 0-based; query the entire line span.
+            return (ln - 1, 0), (ln - 1, 10**9)
+
+        def _text(node) -> str:
+            return self.content[node.start_byte:node.end_byte]
+
+        def _func_node_types(lang: str):
+            js_like = {
+                "function_declaration",
+                "function_expression",
+                "arrow_function",
+                "method_definition",
+            }
+            ts_like = js_like | {"method_signature", "function_signature", "constructor"}
+            java_like = {"method_declaration", "constructor_declaration", "lambda_expression"}
+            rust_like = {"function_item", "closure_expression"}
+
+            lang = (lang or "").lower()
+            if lang in ("javascript", "jsx"):
+                return js_like
+            if lang in ("typescript", "tsx"):
+                return ts_like
+            if lang == "java":
+                return java_like
+            if lang == "rust":
+                return rust_like
+            return js_like | ts_like | java_like | rust_like
+
+        def _nearest_func_ancestor(node, wanted: set):
+            cur = node
+            while cur is not None:
+                if cur.type in wanted:
+                    return cur
+                cur = cur.parent
+            return None
+
+        def _child_by_field_name(node, field: str):
+            try:
+                return node.child_by_field_name(field)
+            except Exception:
+                return None
+
+        def _first_child_of_type(node, types):
+            for ch in node.children:
+                if ch.type in types:
+                    return ch
+            return None
+
+        def _extract_arrow_assigned_name(node):
+            """
+            For arrow functions, try to infer name from the left-hand side:
+            - const foo = () => {}
+            - obj.foo = () => {}
+            - class C { method = () => {} }
+            """
+            p = node.parent
+            hops = 4
+            while p is not None and hops > 0:
+                hops -= 1
+                if p.type in ("variable_declarator", "lexical_declaration", "variable_declaration"):
+                    ident = _first_child_of_type(p, ("identifier", "property_identifier"))
+                    if ident: return _text(ident).strip()
+                    if p.children:
+                        left = p.children[0]
+                        ident = _first_child_of_type(left, ("identifier", "property_identifier"))
+                        if ident: return _text(ident).strip()
+                if p.type == "assignment_expression" and p.children:
+                    lhs = p.children[0]
+                    ident = _first_child_of_type(lhs, ("identifier", "property_identifier"))
+                    if ident: return _text(ident).strip()
+                if p.type in ("method_definition", "pair", "public_field_definition"):
+                    ident = _first_child_of_type(p, ("property_identifier", "identifier"))
+                    if ident: return _text(ident).strip()
+                p = p.parent
+            return "<anonymous>"
+
+        def _extract_name(node):
+            # 1) Prefer a named field
+            nf = _child_by_field_name(node, "name")
+            if nf: return _text(nf).strip()
+            # 2) Common identifier children
+            ident = _first_child_of_type(node, ("identifier", "property_identifier"))
+            if ident: return _text(ident).strip()
+            # 3) Arrow function often anonymous → try LHS
+            if node.type == "arrow_function":
+                return _extract_arrow_assigned_name(node)
+            return "<anonymous>"
+
+        def _extract_params_list(node):
+            """
+            Return a list of parameter "names" (best-effort).
+            For destructuring and complex patterns, we return the raw text slice.
+            """
+            params = _child_by_field_name(node, "parameters")
+            if not params:
+                return []
+
+            # Try to pick identifiers inside parameters; if not found, fall back to raw chunks.
+            result = []
+            # Many grammars wrap the actual list; look for direct children that are parameters
+            # and gather identifiable tokens.
+            def collect_simple_idents(n):
+                found = []
+                stack = [n]
+                while stack:
+                    cur = stack.pop()
+                    if cur.type in ("identifier", "shorthand_property_identifier_pattern", "property_identifier"):
+                        found.append(_text(cur).strip())
+                    else:
+                        stack.extend(cur.children or [])
+                return found
+
+            idents = collect_simple_idents(params)
+            if idents:
+                # de-dup while keeping order
+                seen = set()
+                for s in idents:
+                    if s and s not in seen:
+                        seen.add(s)
+                        result.append(s)
+                return result
+
+            # Fallback: split raw text between parentheses by commas (best-effort).
+            raw = _text(params).strip()
+            if raw.startswith("(") and raw.endswith(")"):
+                raw = raw[1:-1]
+            # Very naive split; fine for most everyday signatures.
+            pieces = [p.strip() for p in raw.split(",")]
+            return [p for p in pieces if p]
+
+        def _extract_params_snippet(node):
+            params = _child_by_field_name(node, "parameters")
+            return _text(params).strip() if params else ""
+
+        def _extract_leading_docstring(func_node):
+            """
+            Collect contiguous line/block comments immediately above the function.
+            Stops at the first blank line or non-comment code.
+            """
+            start_line = func_node.start_point[0]  # 0-based
+            line_idx = start_line - 1
+            if line_idx < 0:
+                return None
+
+            doc_lines = []
+            seen_nonempty = False
+
+            # Walk upward until a blank line without comments or we hit file start.
+            while line_idx >= 0:
+                line = self.lines[line_idx]
+                stripped = line.strip()
+
+                if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*") or stripped.endswith("*/"):
+                    doc_lines.append(line.rstrip())
+                    seen_nonempty = True
+                    line_idx -= 1
+                    continue
+
+                # allow pure whitespace between comment lines
+                if stripped == "" and seen_nonempty:
+                    doc_lines.append(line.rstrip())
+                    line_idx -= 1
+                    continue
+
+                # hit non-comment code or gap above comment block
+                break
+
+            if not doc_lines:
+                return None
+
+            # Reverse to restore top→down order and clean up common JSDoc markers.
+            doc_lines.reverse()
+            doc = "\n".join(doc_lines)
+            # Strip common JSDoc decorations
+            doc = doc.replace("/**", "").replace("*/", "")
+            doc = "\n".join(l.lstrip(" *") for l in doc.splitlines())
+            return doc.strip() or None
+
+        # -------------------- core logic --------------------
+        start_pt, end_pt = _point_for_line(line_number)
+        root = self.tree.root_node
+        try:
+            node = root.descendant_for_point_range(start_pt, end_pt)
+        except Exception:
+            end_pt = (start_pt[0], start_pt[1] + 1)
+            node = root.descendant_for_point_range(start_pt, end_pt)
+
+        if node is None:
+            return None
+
+        func_node = _nearest_func_ancestor(node, _func_node_types(self.language))
+        if func_node is None:
+            return None
+
+        name = _extract_name(func_node)
+        params_snip = _extract_params_snippet(func_node)
+        params_list = _extract_params_list(func_node)
+        doc = _extract_leading_docstring(func_node)
+
+        impl = _text(func_node)
+        start_line0, start_col = func_node.start_point
+        end_line0, end_col = func_node.end_point
+
+        signature = f"{name}{params_snip}" if params_snip else name
+
+        # Build FunctionContext (works whether your class is a plain class or a @dataclass)
+        try:
+            # If FunctionContext is a dataclass or has an __init__ with these fields:
+            return FunctionContext(
+                name=name,
+                signature=signature,
+                implementation=impl,
+                start_line=start_line0 + 1,  # convert to 1-based
+                end_line=end_line0 + 1,
+                file_path=self.file_path,
+                language=self.language,
+                documentation=doc,
+                parameters=params_list,
+            )
+        except TypeError:
+            # If FunctionContext has no __init__, instantiate then assign attributes.
+            ctx = FunctionContext() # type: ignore
+            ctx.name = name
+            ctx.signature = signature
+            ctx.implementation = impl
+            ctx.start_line = start_line0 + 1
+            ctx.end_line = end_line0 + 1
+            ctx.file_path = self.file_path
+            ctx.language = self.language
+            ctx.documentation = doc
+            ctx.parameters = params_list
+            return ctx
+
 
 class RegexParser(SandboxedParser):
     """Regex-based fallback parser"""
@@ -447,7 +691,7 @@ class MultiLanguageFunctionAnalyzer:
             raise ValueError(f"Unsupported language: {language}")
         
         # Try parsers in order of preference
-        parsers = self._get_parsers_for_language(language)
+        parsers:List[tuple[str, TreeSitterParser]] = self._get_parsers_for_language(language)
         
         for parser_type, parser in parsers:
             try:
@@ -479,7 +723,7 @@ class MultiLanguageFunctionAnalyzer:
         
         return language_map.get(ext, 'unknown')
     
-    def _get_parsers_for_language(self, language: str) -> List[tuple]:
+    def _get_parsers_for_language(self, language: str) -> List[tuple[str, TreeSitterParser]]:
         """Get ordered list of parsers to try for a language"""
         parsers = []
         

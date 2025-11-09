@@ -539,7 +539,6 @@ class ErrorAnalysisWorkflow:
                         parsed_error.file_path,
                         parsed_error.line_number
                     )
-                    print(function_context)
                     
                     state['target_function'] = function_context
                     state['cache_misses'] += 1
