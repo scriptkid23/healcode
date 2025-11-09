@@ -28,6 +28,59 @@ class ImpactAnalysis:
     test_recommendations: List[str]
     confidence_score: float  # 0.0 to 1.0
 
+    def convert_llm_response_to_impact(llm_response: Dict[str, Any]): # type: ignore
+        """
+        Converts the LLM fix result (JSON) into 
+        an instance of the ImpactAnalysis class.
+        """
+        
+        # --- Extract and infer data ---
+        
+        # 1. Get confidence_score (direct mapping)
+        confidence = llm_response.get('confidence_score', 0.0)
+        
+        # 2. Get the affected file
+        try:
+            # Get the file path from the context
+            file_path = llm_response['context_used']['error_info']['file']
+            affected = [file_path]
+        except (KeyError, TypeError):
+            affected = []
+            
+        # 3. Create the fix suggestion (merge explanation and new_contents)
+        explanation = llm_response.get('explanation', 'No explanation provided.')
+        try:
+            # Get the new code content (assuming new_contents is a list)
+            fix_code = llm_response.get('new_contents', [''])[0].strip()
+            suggestion = f"{explanation} | Suggested fix: `{fix_code}`"
+        except (IndexError, TypeError):
+            suggestion = explanation
+            
+        suggestions = [suggestion]
+
+        # 4.Assign default values for fields not present in the llm_response
+        # We cannot know "risk_level" or "breaking_changes" 
+        # from the fix JSON, so we assign defaults.
+        
+        if confidence > 0.9:
+            risk = 'low'
+        elif confidence < 0.5:
+            risk = 'high'
+        else:  # Confidence is between 0.5 and 0.9 (inclusive)
+            risk = 'medium'
+        breaking = [] # Assume no breaking changes
+        tests = ['Recommend writing a unit test for the fixed line of code.'] # Default test recommendation
+
+        # --- Create and return the ImpactAnalysis object ---
+        return ImpactAnalysis(
+            risk_level=risk,
+            affected_files=affected,
+            fix_suggestions=suggestions,
+            breaking_changes=breaking,
+            test_recommendations=tests,
+            confidence_score=confidence
+        )
+
 @dataclass
 class NodeMetrics:
     """Metrics for individual node execution"""

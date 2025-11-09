@@ -719,14 +719,15 @@ class ErrorAnalysisWorkflow:
                     if not self.ai_service:
                         raise RuntimeError("AI service unavailable")
                     
-                    # print("fix error: " + full_prompt)
+                    print("fix error: " + full_prompt)
                     
                     llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt)
                     
                     # Parse LLM response as JSON
                     try:
                         # print("llm_response: " + json.dumps(llm_response, indent=2))
-                        impact_analysis = ImpactAnalysis(**llm_response)
+                        impact_analysis:ImpactAnalysis = ImpactAnalysis.convert_llm_response_to_impact(llm_response) # type: ignore
+
                     except (json.JSONDecodeError, TypeError):
                         # Fallback: create basic impact analysis
                         impact_analysis = ImpactAnalysis(
@@ -832,12 +833,12 @@ class ErrorAnalysisWorkflow:
 
     def _get_retry_count(self, state: AnalysisState, node_name: str) -> int:
         """Return current retry count for a node."""
-        retry_map = state.setdefault(self._retry_state_key, {})
+        retry_map = state.setdefault(self._retry_state_key, {}) # type: ignore
         return retry_map.get(node_name, 0)
 
     def _increment_retry_count(self, state: AnalysisState, node_name: str) -> int:
         """Increment and return retry count for a node."""
-        retry_map = state.setdefault(self._retry_state_key, {})
+        retry_map = state.setdefault(self._retry_state_key, {}) # type: ignore
         retry_map[node_name] = retry_map.get(node_name, 0) + 1
         return retry_map[node_name]
 
