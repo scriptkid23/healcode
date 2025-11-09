@@ -564,75 +564,113 @@ class ErrorAnalysisWorkflow:
     async def _find_dependencies_node(self, state: AnalysisState) -> AnalysisState:
         """
         Node 3: Find file dependencies and import relationships
+        Uses only EnhancedZoektSearchManager methods:
+        - analyze_dependency_chain
+        - find_file_imports
+        - find_cross_language_dependencies
         """
         node_name = "find_dependencies"
         node_context = self.metrics_collector.record_node_start(node_name, state)
         retry_count = self._get_retry_count(state, node_name)
-        
+
         try:
-            if not state['parsed_error']:
+            # Sanity checks
+            if not state.get('parsed_error'):
                 raise ValueError("No parsed error information available")
-            
+
             parsed_error = state['parsed_error']
-            
-            if not parsed_error.file_path:
+            if not getattr(parsed_error, 'file_path', None):
                 state['warnings'].append("No file path available for dependency analysis")
                 return state
-            
-            # Check cache
-            cache_key = f"dependencies:{parsed_error.file_path}"
+
+            # Cache look-up
+            cache_key = f"dependencies:{parsed_error.file_path}" # type: ignore
             cached_result = await self.cache_manager.get(cache_key)
-            
             if cached_result:
-                state['import_dependencies'] = cached_result['import_dependencies']
-                state['dependent_files'] = cached_result['dependent_files']
-                state['usage_contexts'] = cached_result['usage_contexts']
+                state['import_dependencies'] = cached_result.get('import_dependencies', [])
+                state['dependent_files'] = cached_result.get('dependent_files', [])
+                state['usage_contexts'] = cached_result.get('usage_contexts', [])
                 state['cache_hits'] += 1
                 node_context['cache_hit'] = True
-            else:
-                if not self.zoekt_manager:
-                    raise ValueError("Zoekt manager not initialized")
-                
-                # Find file imports
-                import_dependencies = await self.zoekt_manager.find_file_imports(parsed_error.file_path)
-                
-                # Extract dependent files
-                dependent_files = [dep.file_path for dep in import_dependencies]
-                
-                # Find usage contexts (simplified for now)
-                usage_contexts = []
-                if state['target_function']:
-                    usage_contexts = await self.zoekt_manager.find_function_usages(
-                        state['target_function'].name,
-                        parsed_error.file_path
-                    )
-                
-                state['import_dependencies'] = import_dependencies
-                state['dependent_files'] = dependent_files
-                state['usage_contexts'] = usage_contexts
-                state['cache_misses'] += 1
-                
-                # Cache the result
-                cache_data = {
-                    'import_dependencies': import_dependencies,
-                    'dependent_files': dependent_files,
-                    'usage_contexts': usage_contexts
-                }
-                await self.cache_manager.set(cache_key, cache_data)
-                state['cache_keys'].append(cache_key)
+
+                metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
+                state['metrics'].node_metrics.append(metrics)
+                self._reset_retry_count(state, node_name)
+                return state
+
+            # No cache → compute
+            if not self.zoekt_manager:
+                raise ValueError("Zoekt manager not initialized")
             
-            # Record success metrics
+
+            target_file = parsed_error.file_path # type: ignore
+
+            # 1) Full dependency chain (provides importers/imports for the target)
+            chain = await self.zoekt_manager.analyze_dependency_chain(target_file)
+            dep_tree = chain.get('dependency_tree', {})
+            target_info = dep_tree.get(target_file, {}) if isinstance(dep_tree, dict) else {}
+
+            importers = list(target_info.get('importers', []) or [])
+            imports = list(target_info.get('imports', []) or [])
+            import_details = list(target_info.get('import_details', []) or [])
+
+            # 2) Cross-language dependencies (who imports this file across languages)
+            cross_lang_details = await self.zoekt_manager.find_cross_language_dependencies(target_file)
+
+            # 3) Merge & dedupe import dependency details by file_path
+            def _dep_file_path(dep):
+                # DependencyInfo is expected to have 'file_path'
+                return getattr(dep, 'file_path', None) or getattr(dep, 'path', None)
+
+            merged_details = list(import_details) + list(cross_lang_details)
+            seen_paths = set()
+            import_dependencies = []
+            for dep in merged_details:
+                fp = _dep_file_path(dep)
+                if not fp or fp in seen_paths:
+                    continue
+                seen_paths.add(fp)
+                import_dependencies.append(dep)
+
+            # 4) Dependent files = importers ∪ imports ∪ paths from import_dependencies
+            dep_files_from_details = [p for p in seen_paths]
+            dependent_files = sorted(set(importers) | set(imports) | set(dep_files_from_details))
+
+            # 5) Usage contexts (best-effort):
+            #    If we don't have function-level usages, consider files that import the target
+            #    as usage contexts (string list of file paths to stay backward-compatible).
+            usage_contexts = sorted(set(importers))
+
+            # Write back to state
+            state['import_dependencies'] = import_dependencies
+            state['dependent_files'] = dependent_files
+            state['usage_contexts'] = usage_contexts
+            state['cache_misses'] += 1
+
+            # Cache the result
+            cache_data = {
+                'import_dependencies': import_dependencies,
+                'dependent_files': dependent_files,
+                'usage_contexts': usage_contexts
+            }
+            await self.cache_manager.set(cache_key, cache_data)
+            state['cache_keys'].append(cache_key)
+
+            # Metrics
+            node_context['dependent_files_count'] = len(dependent_files)
+            node_context['import_dependencies_count'] = len(import_dependencies)
+            node_context['usage_contexts_count'] = len(usage_contexts)
+
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
             self._reset_retry_count(state, node_name)
-            
             return state
-            
+
         except Exception as e:
             return await self._handle_node_error(
                 state, node_name, str(e), node_context
             )
-    
+
     async def _analyze_impact_node(self, state: AnalysisState) -> AnalysisState:
         """
         Node 4: Analyze impact using LLM with few-shot examples
@@ -688,16 +726,13 @@ class ErrorAnalysisWorkflow:
                     # Parse LLM response as JSON
                     try:
                         # print("llm_response: " + json.dumps(llm_response, indent=2))
-                        # impact_data = json.loads(llm_response)
-                        # print(llm_response)
                         impact_analysis = ImpactAnalysis(**llm_response)
-                        # print(impact_analysis)
                     except (json.JSONDecodeError, TypeError):
                         # Fallback: create basic impact analysis
                         impact_analysis = ImpactAnalysis(
                             risk_level="medium",
                             affected_files=state['dependent_files'][:5],
-                            fix_suggestions=[llm_response[:500]],
+                            fix_suggestions=llm_response["error_input"],
                             breaking_changes=[],
                             test_recommendations=["Add unit tests for the fixed function"],
                             confidence_score=0.6
@@ -740,6 +775,9 @@ class ErrorAnalysisWorkflow:
             'function_context': {
                 'name': state['target_function'].name if state['target_function'] else None,
                 'signature': state['target_function'].signature if state['target_function'] else None,
+                'implementation': state['target_function'].implementation if state['target_function'] else None,
+                'start_line': state['target_function'].start_line if state['target_function'] else None,
+                'end_line': state['target_function'].end_line if state['target_function'] else None,
                 'language': state['target_function'].language if state['target_function'] else None,
                 'parameters': state['target_function'].parameters if state['target_function'] else None
             },

@@ -80,10 +80,10 @@ class WorkflowConfig:
     tenant_id: str = "tenant1"
     redis_url: str = "redis://localhost:6379"
     # Model Config
-    primary_model: str = primary_model_name
-    ai_model: str = ai_model_name
-    ai_endpoint: str = ai_endpoint
-    ai_api_key: str = ai_api_key
+    primary_model: str = primary_model_name # type: ignore
+    ai_model: str = ai_model_name # type: ignore
+    ai_endpoint: str = ai_endpoint # type: ignore
+    ai_api_key: str = ai_api_key # type: ignore
 
     model_temperature: float = 0.1  # Low temperature for consistent results
     max_tokens: int = 2048
