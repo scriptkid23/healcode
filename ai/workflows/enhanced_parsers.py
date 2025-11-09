@@ -18,6 +18,9 @@ import signal
 import time
 import psutil
 
+import tree_sitter
+from tree_sitter import Language, Parser
+
 from ai.core.error_context_collector import FunctionContext
 from ai.workflows.config import SecurityConfig, LanguageConfig
 
@@ -159,15 +162,12 @@ class TreeSitterParser(SandboxedParser):
     def __init__(self, language: str, security_config: SecurityConfig):
         super().__init__(security_config)
         self.language = language
-        self._parser = None
+        self._parser = Parser()
         
     def _get_parser(self):
         """Get or create tree-sitter parser for the language"""
         if self._parser is None:
             try:
-                import tree_sitter
-                from tree_sitter import Language, Parser
-                
                 # Language-specific parser setup
                 if self.language == 'java':
                     self._parser = self._create_java_parser()
@@ -194,7 +194,12 @@ class TreeSitterParser(SandboxedParser):
     def _create_javascript_parser(self):
         """Create JavaScript tree-sitter parser"""
         # This would be implemented with actual tree-sitter JavaScript grammar
-        raise NotImplementedError("JavaScript tree-sitter parser not yet implemented")
+        try:
+            import tree_sitter_javascript as js
+            parser = Parser(Language(js.language()))
+            return parser
+        except ImportError:
+            raise NotImplementedError("JavaScript tree-sitter parser not yet implemented")
     
     def _create_typescript_parser(self):
         """Create TypeScript tree-sitter parser"""

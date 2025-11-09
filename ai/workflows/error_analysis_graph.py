@@ -70,7 +70,7 @@ except ImportError:
     END = "__END__"
 
 from ai.workflows.state import AnalysisState, create_initial_state, state_to_json_output, NodeMetrics, ImpactAnalysis
-from ai.workflows.config import WorkflowConfig
+from ai.workflows.config import LanguageConfig, WorkflowConfig
 from ai.workflows.enhanced_parsers import MultiLanguageFunctionAnalyzer
 from ai.workflows.enhanced_zoekt_manager import EnhancedZoektSearchManager
 from ai.workflows.few_shot_examples import FewShotExampleManager
@@ -90,7 +90,6 @@ class ErrorInputParser:
     def parse(self, error_input: str) -> ErrorInfo:
         """Parse a raw error string into ErrorInfo."""
         match = self._PATTERN_VARIABLE_ERROR.search(error_input)
-        print(match)
         if match:
             return ErrorInfo(
                 variable_or_symbol=match.group(1),
@@ -366,7 +365,7 @@ class ErrorAnalysisWorkflow:
         
         self.function_analyzer = MultiLanguageFunctionAnalyzer(
             self.config.security,
-            self.config.language
+            LanguageConfig()
         )
     
     def _create_graph(self) -> StateGraph:
@@ -455,27 +454,21 @@ class ErrorAnalysisWorkflow:
                 state['parsed_error'] = cached_result
                 state['cache_hits'] += 1
                 node_context['cache_hit'] = True
-                print(123)
             else:
-                print(state['raw_error'])
                 # Parse the error
                 parsed_error = self.error_parser.parse(state['raw_error'])
-                print(parsed_error)
                 
                 # Sanitize sensitive information
                 if parsed_error and hasattr(parsed_error, 'context') and parsed_error.context:
-                    print(2342)
                     sanitized_context, redactions = self.security_manager.sanitize_content(parsed_error.context)
                     parsed_error.context = sanitized_context
                     
                     if redactions:
                         state['sensitive_data_detected'] = True
                         state['sanitized_content'].update(redactions)
-                print(345)
                 
                 state['parsed_error'] = parsed_error
                 state['cache_misses'] += 1
-                print(456)
                 
                 # Cache the result
                 await self.cache_manager.set(cache_key, parsed_error)
@@ -546,6 +539,7 @@ class ErrorAnalysisWorkflow:
                         parsed_error.file_path,
                         parsed_error.line_number
                     )
+                    print(function_context)
                     
                     state['target_function'] = function_context
                     state['cache_misses'] += 1
@@ -688,12 +682,17 @@ class ErrorAnalysisWorkflow:
                     if not self.ai_service:
                         raise RuntimeError("AI service unavailable")
                     
-                    llm_response = await self.ai_service.chat(full_prompt)
+                    # print("fix error: " + full_prompt)
+                    
+                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt)
                     
                     # Parse LLM response as JSON
                     try:
-                        impact_data = json.loads(llm_response)
-                        impact_analysis = ImpactAnalysis(**impact_data)
+                        # print("llm_response: " + json.dumps(llm_response, indent=2))
+                        # impact_data = json.loads(llm_response)
+                        # print(llm_response)
+                        impact_analysis = ImpactAnalysis(**llm_response)
+                        # print(impact_analysis)
                     except (json.JSONDecodeError, TypeError):
                         # Fallback: create basic impact analysis
                         impact_analysis = ImpactAnalysis(
