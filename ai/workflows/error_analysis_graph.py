@@ -688,6 +688,7 @@ class ErrorAnalysisWorkflow:
         try:
             # Prepare context for LLM
             context = self._prepare_llm_context(state)
+            parsed_error = state['parsed_error']
             
             # Get few-shot examples
             language = None
@@ -732,7 +733,7 @@ class ErrorAnalysisWorkflow:
                     # Parse LLM response as JSON
                     try:
                         print("llm_response: " + json.dumps(llm_response, indent=2))
-                        await self._editer_code(llm_response)
+                        await self._editer_code(parsed_error.file_path, llm_response) # type: ignore
                         impact_analysis:ImpactAnalysis = ImpactAnalysis.convert_llm_response_to_impact(llm_response) # type: ignore
 
                     except (json.JSONDecodeError, TypeError):
@@ -804,10 +805,11 @@ class ErrorAnalysisWorkflow:
         
         return context
     
-    async def _editer_code(self, llm_response:Dict[str, Any]):
+    async def _editer_code(self, file_path:str, llm_response:Dict[str, Any]):
         try:
+            print(file_path, llm_response["line_numbers"])
             result_batch = await self.editer_manager.edit_lines( # type: ignore
-                file_path=llm_response["context_used"]["error_info"]["file"],
+                file_path=file_path,
                 line_numbers=llm_response["line_numbers"],
                 new_contents=llm_response["new_contents"],
                 options=EditOptions(create_backup=True)
