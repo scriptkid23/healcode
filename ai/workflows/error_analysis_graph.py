@@ -17,6 +17,9 @@ from pathlib import Path
 import psutil
 import traceback
 
+from editor.interfaces import EditOptions
+from editor.service import EditorConfig, EditorService
+
 USING_MOCK_LANGGRAPH = False
 
 try:
@@ -284,6 +287,7 @@ class ErrorAnalysisWorkflow:
         # Initialize search and parsing services (will be set up in setup method)
         self.zoekt_manager: Optional[EnhancedZoektSearchManager] = None
         self.function_analyzer: Optional[MultiLanguageFunctionAnalyzer] = None
+        self.editer_manager: Optional[EditorService] = None
         
         # Create the graph
         self.graph = self._create_graph()
@@ -355,7 +359,7 @@ class ErrorAnalysisWorkflow:
                 "Failed to initialize AI service and fallback is disabled."
             ) from exc
     
-    def setup(self, zoekt_client: ZoektClient):
+    def setup(self, zoekt_client: ZoektClient, editer_config: EditorConfig):
         """Setup the workflow with required dependencies"""
         self.zoekt_manager = EnhancedZoektSearchManager(
             zoekt_client, 
@@ -367,6 +371,8 @@ class ErrorAnalysisWorkflow:
             self.config.security,
             LanguageConfig()
         )
+        
+        self.editer_manager = EditorService(editer_config)
     
     def _create_graph(self) -> StateGraph:
         """Create the LangGraph workflow"""
@@ -719,13 +725,14 @@ class ErrorAnalysisWorkflow:
                     if not self.ai_service:
                         raise RuntimeError("AI service unavailable")
                     
-                    print("fix error: " + full_prompt)
+                    # print("fix error: " + full_prompt)
                     
                     llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt)
                     
                     # Parse LLM response as JSON
                     try:
-                        # print("llm_response: " + json.dumps(llm_response, indent=2))
+                        print("llm_response: " + json.dumps(llm_response, indent=2))
+                        await self._editer_code(llm_response)
                         impact_analysis:ImpactAnalysis = ImpactAnalysis.convert_llm_response_to_impact(llm_response) # type: ignore
 
                     except (json.JSONDecodeError, TypeError):
@@ -797,6 +804,19 @@ class ErrorAnalysisWorkflow:
         
         return context
     
+    async def _editer_code(self, llm_response:Dict[str, Any]):
+        try:
+            result_batch = await self.editer_manager.edit_lines( # type: ignore
+                file_path=llm_response["context_used"]["error_info"]["file"],
+                line_numbers=llm_response["line_numbers"],
+                new_contents=llm_response["new_contents"],
+                options=EditOptions(create_backup=True)
+            )
+            print("\nBatch edit result:", result_batch)
+        except:
+            print(f"Failed to edit file {llm_response["context_used"]["error_info"]["file"]}")
+            raise ValueError(f"Failed to edit file {llm_response["context_used"].error_info.file}")
+
     def _create_fallback_analysis(self, state: AnalysisState) -> ImpactAnalysis:
         """Create fallback analysis when LLM fails"""
         # Simple heuristic-based analysis

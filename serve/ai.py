@@ -1,3 +1,4 @@
+from editor.service import EditorConfig
 from indexer.zoekt_client import ZoektClient
 from ai.workflows.error_analysis_graph import ErrorAnalysisWorkflow, WorkflowConfig
 from dotenv import load_dotenv
@@ -14,8 +15,9 @@ def getErrorAnalysisWorkflow():
     )
 
     zoekt = ZoektClient("http://localhost:6070")
+    editer_config = EditorConfig()
     workflow = ErrorAnalysisWorkflow(workflow_config)
-    workflow.setup(zoekt)
+    workflow.setup(zoekt, editer_config)
     return workflow
 
     
