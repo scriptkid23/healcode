@@ -77,64 +77,9 @@ from ai.workflows.config import LanguageConfig, WorkflowConfig
 from ai.workflows.enhanced_parsers import MultiLanguageFunctionAnalyzer
 from ai.workflows.enhanced_zoekt_manager import EnhancedZoektSearchManager
 from ai.workflows.few_shot_examples import FewShotExampleManager
-from ai.core.error_context_collector import ErrorInfo
+from ai.core.error_context_collector import ErrorContextCollector, ErrorInfo
 from ai.services.ai_service import AIService
 from indexer.zoekt_client import ZoektClient
-
-class ErrorInputParser:
-    """Parse raw error strings into structured ErrorInfo objects."""
-
-    _PATTERN_VARIABLE_ERROR = re.compile(r"(\w+)\s+(\w+)\s+error\s+([^\s]+)\s+(\d+):(\d+)")
-    _PATTERN_LOCATION_ERROR = re.compile(r"([^\s:]+):(\d+):(\d+)\s*-\s*.*?(\w+)")
-    _PATTERN_STACK_ERROR = re.compile(r"(\w+Error):\s*.*?\s+at\s+([^\s:]+):(\d+):(\d+)")
-    _PATTERN_FILE = re.compile(r"([^\s:]+\.[a-zA-Z]+)")
-    _PATTERN_LINE = re.compile(r":(\d+)")
-
-    def parse(self, error_input: str) -> ErrorInfo:
-        """Parse a raw error string into ErrorInfo."""
-        match = self._PATTERN_VARIABLE_ERROR.search(error_input)
-        if match:
-            return ErrorInfo(
-                variable_or_symbol=match.group(1),
-                error_type=match.group(2),
-                file_path=match.group(3),
-                line_number=int(match.group(4)),
-                column_number=int(match.group(5)),
-            )
-
-        match = self._PATTERN_LOCATION_ERROR.search(error_input)
-        if match:
-            return ErrorInfo(
-                file_path=match.group(1),
-                line_number=int(match.group(2)),
-                column_number=int(match.group(3)),
-                error_type=match.group(4),
-                variable_or_symbol="",
-            )
-
-        match = self._PATTERN_STACK_ERROR.search(error_input)
-        if match:
-            return ErrorInfo(
-                error_type=match.group(1),
-                file_path=match.group(2),
-                line_number=int(match.group(3)),
-                column_number=int(match.group(4)),
-                variable_or_symbol="",
-            )
-
-        file_match = self._PATTERN_FILE.search(error_input)
-        line_match = self._PATTERN_LINE.search(error_input)
-        if file_match and line_match:
-            return ErrorInfo(
-                file_path=file_match.group(1),
-                line_number=int(line_match.group(1)),
-                error_type="unknown",
-                variable_or_symbol="",
-            )
-
-        raise ValueError(f"Unable to parse error input: {error_input}")
-
-
 class SecurityManager:
     """Handles security aspects of the workflow."""
     
@@ -279,7 +224,7 @@ class ErrorAnalysisWorkflow:
         self.metrics_collector = MetricsCollector(config)
         self.cache_manager = WorkflowCacheManager(config.performance.cache_ttl_seconds)
         self.few_shot_manager = FewShotExampleManager(config.few_shot_examples_path)
-        self.error_parser = ErrorInputParser()
+        self.error_collector: Optional[ErrorContextCollector] = None
         
         # Initialize AI service with validation/fallback
         self.ai_service: Optional[AIService] = self._initialize_ai_service(config)
@@ -373,6 +318,13 @@ class ErrorAnalysisWorkflow:
         )
         
         self.editer_manager = EditorService(editer_config)
+        self.error_collector = ErrorContextCollector(
+            zoekt_client, 
+            self.function_analyzer, 
+            self.metrics_collector, 
+            self.cache_manager, 
+            self.zoekt_manager
+        )
     
     def _create_graph(self) -> StateGraph:
         """Create the LangGraph workflow"""
@@ -447,9 +399,8 @@ class ErrorAnalysisWorkflow:
         """
         Node 1: Parse the error message and extract structured information
         """
-        node_name = "parse_error"
-        node_context = self.metrics_collector.record_node_start(node_name, state)
-        retry_count = self._get_retry_count(state, node_name)
+        node_context = self.metrics_collector.record_node_start("parse_error", state)
+        retry_count = 0
         
         try:
             # Check cache first
@@ -462,7 +413,8 @@ class ErrorAnalysisWorkflow:
                 node_context['cache_hit'] = True
             else:
                 # Parse the error
-                parsed_error = self.error_parser.parse(state['raw_error'])
+                parsed_error = self.error_collector.parse_error_input(state['raw_error'])
+                print(parsed_error)
                 
                 # Sanitize sensitive information
                 if parsed_error and hasattr(parsed_error, 'context') and parsed_error.context:
@@ -483,13 +435,12 @@ class ErrorAnalysisWorkflow:
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
-            self._reset_retry_count(state, node_name)
             
             return state
             
         except Exception as e:
             return await self._handle_node_error(
-                state, node_name, str(e), node_context
+                state, "parse_error", str(e), node_context, retry_count
             )
     
     async def _parse_file_node(self, state: AnalysisState) -> AnalysisState:
@@ -726,7 +677,7 @@ class ErrorAnalysisWorkflow:
                     if not self.ai_service:
                         raise RuntimeError("AI service unavailable")
                     
-                    # print("fix error: " + full_prompt)
+                    print("fix error: " + full_prompt)
                     
                     llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt)
                     

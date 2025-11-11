@@ -124,6 +124,30 @@ class ErrorContextCollector:
                 variable_or_symbol=""
             )
         
+        pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
+        match = re.search(pattern4, error_input)
+        if match:
+            return ErrorInfo(
+                file_path=match.group(1),
+                line_number=int(match.group(2)),
+                error_type=match.group(3),
+                variable_or_symbol="",
+                column_number=None
+            )
+        
+        # Fallback: try to extract basic info
+        file_match = re.search(r"([^\s:]+\.[a-zA-Z]+)", error_input)
+        line_match = re.search(r":(\d+)", error_input)
+
+        if file_match and line_match:
+            return ErrorInfo(
+                file_path=file_match.group(1),
+                line_number=int(line_match.group(1)),
+                error_type="unknown",
+                variable_or_symbol=""
+            )
+
+        print(f"Unable to parse error input: {error_input}")
         raise ValueError(f"Unable to parse error input: {error_input}")
 
     def generate_cache_key(self, error_info: ErrorInfo, file_content_hash: str) -> str:
