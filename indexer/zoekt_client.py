@@ -1,3 +1,4 @@
+import json
 import httpx
 import base64
 from typing import Any, Dict, List, Optional
@@ -29,9 +30,9 @@ class ZoektClient:
 
     async def _search(self, query: Dict[str, Any]) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(self.endpoint, json=query)
-            resp.raise_for_status()
-            data = resp.json()
+            resp:httpx.Response = await client.post(self.endpoint, json=query)
+            resp = resp.raise_for_status()
+            data = json.loads(resp.text)
             return self._parse_response(data)
 
     def _parse_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:

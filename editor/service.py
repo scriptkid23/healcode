@@ -389,7 +389,7 @@ class EditorService:
         """Clean up old backup files"""
         await self.backup_manager.cleanup_old_backups()
 
-    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: list, options: Optional[EditOptions] = None) -> EditResult:
+    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: str|list, options: Optional[EditOptions] = None) -> EditResult:
         """Convenience method for editing multiple lines"""
         request = EditRequest(
             file_path=file_path,

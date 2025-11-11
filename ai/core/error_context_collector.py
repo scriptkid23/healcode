@@ -6,6 +6,8 @@ from pathlib import Path
 import hashlib
 import time
 
+from indexer.zoekt_client import ZoektClient
+
 @dataclass
 class ErrorInfo:
     """Structured error information extracted from input"""
@@ -54,7 +56,7 @@ class ErrorContextCollector:
     """Main orchestrator for collecting enhanced context around code errors"""
     
     def __init__(self, 
-                 zoekt_client,
+                 zoekt_client:ZoektClient,
                  function_analyzer,
                  context_summarizer,
                  cache_manager,
@@ -111,19 +113,7 @@ class ErrorContextCollector:
                 column_number=int(match.group(4)),
                 variable_or_symbol=""  # Will be extracted from context
             )
-        
-        # Fallback: try to extract basic info
-        file_match = re.search(r"([^\s:]+\.[a-zA-Z]+)", error_input)
-        line_match = re.search(r":(\d+)", error_input)
-        
-        if file_match and line_match:
-            return ErrorInfo(
-                file_path=file_match.group(1),
-                line_number=int(line_match.group(1)),
-                error_type="unknown",
-                variable_or_symbol=""
-            )
-        
+        # Pattern4: Python
         pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
         match = re.search(pattern4, error_input)
         if match:
@@ -133,6 +123,20 @@ class ErrorContextCollector:
                 error_type=match.group(3),
                 variable_or_symbol="",
                 column_number=None
+            )
+
+        pattern5 = r"([^:\s]+):(\d+): \w+: (.*)"
+        match = re.search(pattern5, error_input)
+        if match:
+            # if (self.zoekt_client):
+                # file_path = await self.zoekt_client.search_by_filename(match.group(1), 1)
+                # print(file_path[0])
+            return ErrorInfo(
+                file_path=match.group(1),
+                line_number=int(match.group(2)),
+                error_type=match.group(3), # Đây là thông điệp lỗi
+                variable_or_symbol="",
+                column_number=None 
             )
         
         # Fallback: try to extract basic info

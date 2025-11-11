@@ -758,11 +758,13 @@ class ErrorAnalysisWorkflow:
     
     async def _editer_code(self, file_path:str, llm_response:Dict[str, Any]):
         try:
-            print(file_path, llm_response["line_numbers"])
+            print("fix: ", llm_response["new_contents"])
+            contents_value = llm_response["new_contents"]
+            new_contents = [contents_value] if not isinstance(contents_value, list) else contents_value
             result_batch = await self.editer_manager.edit_lines( # type: ignore
                 file_path=file_path,
                 line_numbers=llm_response["line_numbers"],
-                new_contents=llm_response["new_contents"],
+                new_contents=new_contents,
                 options=EditOptions(create_backup=True)
             )
             print("\nBatch edit result:", result_batch)
