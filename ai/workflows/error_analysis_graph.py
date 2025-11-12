@@ -679,7 +679,7 @@ class ErrorAnalysisWorkflow:
                     
                     print("fix error: " + user_prompt)
                     
-                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt)
+                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt, state["parsed_error"]) # type: ignore
                     
                     # Parse LLM response as JSON
                     try:

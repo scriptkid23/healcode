@@ -34,7 +34,7 @@ class EditorConfig:
     lock_timeout_seconds: int = 30
     operation_timeout_seconds: int = 60
     allowed_extensions: List[str] = field(default_factory=lambda: [
-        '.py', '.js', '.ts', '.json', '.yaml', '.yml', '.txt', '.md'
+        '.py', '.java', '.js', '.ts', '.json', '.yaml', '.yml', '.txt', '.md'
     ])
     max_file_size_mb: int = 50
     validate_syntax: bool = True
