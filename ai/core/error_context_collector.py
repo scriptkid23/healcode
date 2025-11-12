@@ -1,3 +1,4 @@
+import os
 import re
 import asyncio
 from dataclasses import dataclass
@@ -71,7 +72,7 @@ class ErrorContextCollector:
         self.max_files = max_files
         self.max_processing_time = max_processing_time
 
-    def parse_error_input(self, error_input: str) -> ErrorInfo:
+    async def parse_error_input(self, error_input: str) -> ErrorInfo:
         """
         Parse various error input formats:
         - "input undefined error main.js 33:12"
@@ -117,8 +118,9 @@ class ErrorContextCollector:
         pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
         match = re.search(pattern4, error_input)
         if match:
+            file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
             return ErrorInfo(
-                file_path=match.group(1),
+                file_path=file_path,
                 line_number=int(match.group(2)),
                 error_type=match.group(3),
                 variable_or_symbol="",
@@ -128,11 +130,10 @@ class ErrorContextCollector:
         pattern5 = r"([^:\s]+):(\d+): \w+: (.*)"
         match = re.search(pattern5, error_input)
         if match:
-            # if (self.zoekt_client):
-                # file_path = await self.zoekt_client.search_by_filename(match.group(1), 1)
-                # print(file_path[0])
+            file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+  
             return ErrorInfo(
-                file_path=match.group(1),
+                file_path=file_path, # type: ignore
                 line_number=int(match.group(2)),
                 error_type=match.group(3), # Đây là thông điệp lỗi
                 variable_or_symbol="",
@@ -233,6 +234,49 @@ class ErrorContextCollector:
                 processing_time_ms=int((time.time() - start_time) * 1000),
                 cache_hit=False
             )
+
+    async def _find_correct_file_path(self, repo_name: str, path_error: str):
+        # This is a fast, sync string operation.
+        path_guess = self._normalize_path_for_zoekt(repo_name, path_error)
+        
+        # Try to find the file using the full guessed path.
+        results = await self.zoekt_client.search_by_filename(
+            filename=path_guess
+        )
+
+        if results and len(results) == 1:
+            return results[0]["FileName"]
+
+        # try a fallback search using only the bare filename.
+        print(f"Could not find '{path_guess}'. Trying fallback...")
+        
+        fallback_name = os.path.basename(path_guess)
+        
+        results_fallback = await self.zoekt_client.search_by_filename(
+            filename=fallback_name
+        )
+        
+        if results_fallback and results_fallback[0].get("FileCount", 0) > 0:
+            return results_fallback[0]["Files"][0]["FileName"]
+        
+        # Give up, return the best guess we had
+        return path_guess
+    
+    def _normalize_path_for_zoekt(self, repo_name: str, path_error: str) -> str:
+        """
+        Cleans the error path. NO I/O, NO 'await'. Just string processing.
+        """
+        # ... (Implementation from previous message) ...
+        base_repo_name = repo_name.split('/')[-1].split('\\')[-1]
+        clean_path = path_error.replace("\\", "/")
+        clean_path = re.sub(r":\d+.*$", "", clean_path).strip()
+
+        if base_repo_name in clean_path:
+            repo_index = clean_path.find(base_repo_name)
+            start_index = repo_index + len(base_repo_name)
+            return clean_path[start_index:].lstrip("/")
+        else:
+            return clean_path.lstrip("./")
 
     async def _get_file_content(self, file_path: str) -> str:
         """Get file content, handling both absolute and relative paths"""

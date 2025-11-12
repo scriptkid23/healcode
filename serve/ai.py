@@ -14,7 +14,7 @@ def getErrorAnalysisWorkflow():
         primary_model=primary_model_name
     )
 
-    zoekt = ZoektClient("http://localhost:6070")
+    zoekt = ZoektClient()
     editer_config = EditorConfig()
     workflow = ErrorAnalysisWorkflow(workflow_config)
     workflow.setup(zoekt, editer_config)

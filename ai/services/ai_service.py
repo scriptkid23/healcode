@@ -205,7 +205,7 @@ Provide a detailed analysis with specific fixes and high confidence based on the
         
         try:
             # Parse error to extract file information
-            error_info = self.error_context_collector.parse_error_input(error_input)
+            error_info = await self.error_context_collector.parse_error_input(error_input)
             
             # Read the file content
             file_content = await self.error_context_collector._get_file_content(error_info.file_path)
