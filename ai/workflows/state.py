@@ -118,7 +118,7 @@ class AnalysisState(TypedDict):
     workflow_id: str
     
     # Parsed Error Information
-    parsed_error: Optional[ErrorInfo]
+    parsed_errors: List[ErrorInfo]
     
     # Function Analysis
     target_function: Optional[FunctionContext]

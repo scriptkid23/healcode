@@ -72,85 +72,91 @@ class ErrorContextCollector:
         self.max_files = max_files
         self.max_processing_time = max_processing_time
 
-    async def parse_error_input(self, error_input: str) -> ErrorInfo:
+    async def parse_error_input(self, error_input: str) -> List[ErrorInfo]:
         """
         Parse various error input formats:
         - "input undefined error main.js 33:12"
         - "TypeError: Cannot read property 'value' of null at main.js:33:12"
         - "main.js:33:12 - error TS2304: Cannot find name 'input'"
         """
+        # Setup return
+        error_input = error_input.replace("\n", " ")
+        errors_list: List[ErrorInfo] = []
+
         # Pattern 1: "variable_name error_type error file_path line:column"
-        pattern1 = r"(\w+)\s+(\w+)\s+error\s+([^\s]+)\s+(\d+):(\d+)"
-        match = re.search(pattern1, error_input)
-        if match:
-            return ErrorInfo(
-                variable_or_symbol=match.group(1),
-                error_type=match.group(2),
-                file_path=match.group(3),
-                line_number=int(match.group(4)),
-                column_number=int(match.group(5))
-            )
+        # pattern1 = r"(\w+)\s+(\w+)\s+error\s+([^\s]+)\s+(\d+):(\d+)"
+        # match = re.search(pattern1, error_input)
+        # if match:
+        #     return ErrorInfo(
+        #         variable_or_symbol=match.group(1),
+        #         error_type=match.group(2),
+        #         file_path=match.group(3),
+        #         line_number=int(match.group(4)),
+        #         column_number=int(match.group(5))
+        #     )
         
         # Pattern 2: "file_path:line:column - error message"
-        pattern2 = r"([^\s:]+):(\d+):(\d+)\s*-\s*.*?(\w+)"
-        match = re.search(pattern2, error_input)
-        if match:
-            return ErrorInfo(
-                file_path=match.group(1),
-                line_number=int(match.group(2)),
-                column_number=int(match.group(3)),
-                error_type=match.group(4),
-                variable_or_symbol=""  # Will be extracted from context
-            )
+        # pattern2 = r"([^\s:]+):(\d+):(\d+)\s*-\s*.*?(\w+)"
+        # match = re.search(pattern2, error_input)
+        # if match:
+        #     return ErrorInfo(
+        #         file_path=match.group(1),
+        #         line_number=int(match.group(2)),
+        #         column_number=int(match.group(3)),
+        #         error_type=match.group(4),
+        #         variable_or_symbol=""  # Will be extracted from context
+        #     )
         
         # Pattern 3: "ErrorType: message at file_path:line:column"
-        pattern3 = r"(\w+Error):\s*.*?\s+at\s+([^\s:]+):(\d+):(\d+)"
-        match = re.search(pattern3, error_input)
-        if match:
-            return ErrorInfo(
-                error_type=match.group(1),
-                file_path=match.group(2),
-                line_number=int(match.group(3)),
-                column_number=int(match.group(4)),
-                variable_or_symbol=""  # Will be extracted from context
-            )
+        # pattern3 = r"(\w+Error):\s*.*?\s+at\s+([^\s:]+):(\d+):(\d+)"
+        # match = re.search(pattern3, error_input)
+        # if match:
+        #     return ErrorInfo(
+        #         error_type=match.group(1),
+        #         file_path=match.group(2),
+        #         line_number=int(match.group(3)),
+        #         column_number=int(match.group(4)),
+        #         variable_or_symbol=""  # Will be extracted from context
+        #     )
         # Pattern4: Python
-        pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
-        match = re.search(pattern4, error_input)
-        if match:
-            file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
-            return ErrorInfo(
-                file_path=file_path,
-                line_number=int(match.group(2)),
-                error_type=match.group(3),
-                variable_or_symbol="",
-                column_number=None
-            )
+        # pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
+        # match = re.search(pattern4, error_input)
+        # if match:
+        #     file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+        #     return ErrorInfo(
+        #         file_path=file_path,
+        #         line_number=int(match.group(2)),
+        #         error_type=match.group(3),
+        #         variable_or_symbol="",
+        #         column_number=None
+        #     )
 
-        pattern5 = r"([^:\s]+):(\d+): \w+: (.*)"
-        match = re.search(pattern5, error_input)
-        if match:
-            file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
-  
-            return ErrorInfo(
-                file_path=file_path, # type: ignore
-                line_number=int(match.group(2)),
-                error_type=match.group(3), # Đây là thông điệp lỗi
-                variable_or_symbol="",
-                column_number=None 
-            )
+        pattern5 = r"([^:\s]+):(\d+): \w+: (.*?)\s+.*?\^"
+        matches = re.finditer(pattern5, error_input)
+        if matches:
+            for match in matches:
+                file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+                error = ErrorInfo(
+                    file_path=file_path, # type: ignore
+                    line_number=int(match.group(2)),
+                    error_type=match.group(3).strip(), # Đây là thông điệp lỗi
+                    variable_or_symbol="",
+                    column_number=None 
+                )
+                errors_list.append(error)
+            return errors_list
         
         # Fallback: try to extract basic info
         file_match = re.search(r"([^\s:]+\.[a-zA-Z]+)", error_input)
         line_match = re.search(r":(\d+)", error_input)
 
         if file_match and line_match:
-            return ErrorInfo(
+            return [ErrorInfo(
                 file_path=file_match.group(1),
                 line_number=int(line_match.group(1)),
                 error_type="unknown",
                 variable_or_symbol=""
-            )
+            )]
 
         print(f"Unable to parse error input: {error_input}")
         raise ValueError(f"Unable to parse error input: {error_input}")

@@ -408,28 +408,28 @@ class ErrorAnalysisWorkflow:
             cached_result = await self.cache_manager.get(cache_key)
             
             if cached_result:
-                state['parsed_error'] = cached_result
+                state['parsed_errors'] = cached_result
                 state['cache_hits'] += 1
                 node_context['cache_hit'] = True
             else:
                 # Parse the error
-                parsed_error = await self.error_collector.parse_error_input(state['raw_error'])
-                print(parsed_error)
+                parsed_errors = await self.error_collector.parse_error_input(state['raw_error'])
+                print(parsed_errors)
                 
                 # Sanitize sensitive information
-                if parsed_error and hasattr(parsed_error, 'context') and parsed_error.context:
-                    sanitized_context, redactions = self.security_manager.sanitize_content(parsed_error.context)
-                    parsed_error.context = sanitized_context
+                if parsed_errors and hasattr(parsed_errors, 'context') and parsed_errors.context:
+                    sanitized_context, redactions = self.security_manager.sanitize_content(parsed_errors.context)
+                    parsed_errors.context = sanitized_context
                     
                     if redactions:
                         state['sensitive_data_detected'] = True
                         state['sanitized_content'].update(redactions)
                 
-                state['parsed_error'] = parsed_error
+                state['parsed_errors'] = parsed_errors
                 state['cache_misses'] += 1
                 
                 # Cache the result
-                await self.cache_manager.set(cache_key, parsed_error)
+                await self.cache_manager.set(cache_key, parsed_errors)
                 state['cache_keys'].append(cache_key)
             
             # Record success metrics
