@@ -442,7 +442,7 @@ class ErrorAnalysisWorkflow:
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
-            
+
             return state
             
         except Exception as e:
@@ -461,7 +461,6 @@ class ErrorAnalysisWorkflow:
         try:
             if not state['parsed_errors']:
                 raise ValueError("No parsed error information available")
-            
             parsed_errors = state['parsed_errors']
             cache_key = ""
             unique_functions_tracker: Dict[str, FunctionContext] = {}

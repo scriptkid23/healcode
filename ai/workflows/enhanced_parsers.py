@@ -10,7 +10,7 @@ import re
 import subprocess
 import tempfile
 import os
-from typing import Optional, Dict, List, Any, Protocol, Union
+from typing import Optional, Dict, List, Any, Protocol, Union, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import resource
@@ -101,11 +101,68 @@ class PythonASTParser(SandboxedParser):
             return PythonParseResult(tree, file_content, file_path)
             
         except (SyntaxError, ValueError) as e:
+            recovered_content = self._recover_python_source(file_content, e)
+            if recovered_content:
+                try:
+                    tree = ast.parse(recovered_content)
+                    # Use original content for downstream consumers to keep source fidelity
+                    return PythonParseResult(tree, file_content, file_path)
+                except SyntaxError as recovery_error:
+                    raise ValueError(f"Failed to parse Python code: {recovery_error}") from recovery_error
             raise ValueError(f"Failed to parse Python code: {e}")
         except TimeoutError:
             raise TimeoutError("Python AST parsing timed out")
         finally:
             self._cleanup_sandbox()
+
+    def _recover_python_source(self, file_content: str, error: Exception) -> Optional[str]:
+        """
+        Attempt lightweight recovery for common syntax issues (e.g., missing colon)
+        so that downstream analysis can still proceed.
+        """
+        if not isinstance(error, SyntaxError) or not error.lineno:
+            return None
+        message = (error.msg or str(error)).lower()
+        if "expected ':'" not in message:
+            return None
+        lines = file_content.split('\n')
+        idx = error.lineno - 1
+        if idx < 0 or idx >= len(lines):
+            return None
+        code_part, comment_part = self._split_code_and_comment(lines[idx])
+        stripped = code_part.rstrip()
+        if not stripped or stripped.endswith(':'):
+            return None
+        fixed_code = f"{stripped}:"
+        if comment_part:
+            sep = '' if comment_part.startswith(' ') else ' '
+            fixed_code = f"{fixed_code}{sep}{comment_part.lstrip()}"
+        lines[idx] = fixed_code
+        return '\n'.join(lines)
+
+    def _split_code_and_comment(self, line: str) -> Tuple[str, str]:
+        """
+        Split a line into code and trailing comment, respecting quoted hashes.
+        Returns (code, comment_without_leading_spaces_or_empty).
+        """
+        in_single = in_double = False
+        escape = False
+        for idx, ch in enumerate(line):
+            if escape:
+                escape = False
+                continue
+            if ch == '\\':
+                escape = True
+                continue
+            if ch == "'" and not in_double:
+                in_single = not in_single
+                continue
+            if ch == '"' and not in_single:
+                in_double = not in_double
+                continue
+            if ch == '#' and not in_single and not in_double:
+                return line[:idx], line[idx:]
+        return line, ""
 
 class PythonParseResult:
     """Result of Python AST parsing"""
@@ -171,6 +228,8 @@ class TreeSitterParser(SandboxedParser):
                 # Language-specific parser setup
                 if self.language == 'java':
                     self._parser = self._create_java_parser()
+                elif self.language == 'python':
+                    self._parser = self._create_python_parser()
                 elif self.language == 'javascript':
                     self._parser = self._create_javascript_parser()
                 elif self.language == 'typescript':
@@ -195,6 +254,15 @@ class TreeSitterParser(SandboxedParser):
             return parser
         except ImportError:
             raise NotImplementedError("Java tree-sitter parser not yet implemented")
+    
+    def _create_python_parser(self):
+        try:
+            import tree_sitter_python as py
+            parser = Parser(Language(py.language()))
+            print(21713213)
+            return parser
+        except ImportError:
+            raise NotImplementedError("Python tree-sitter parser not yet implemented")
     
     def _create_javascript_parser(self):
         """Create JavaScript tree-sitter parser"""
@@ -695,12 +763,11 @@ class MultiLanguageFunctionAnalyzer:
         
         # Try parsers in order of preference
         parsers:List[tuple[str, TreeSitterParser]] = self._get_parsers_for_language(language)
-        
+        print(parsers)
         for parser_type, parser in parsers:
             try:
                 result = parser.parse(file_content, file_path)
                 function_context = result.get_function_at_line(target_line)
-                
                 if function_context:
                     return function_context
                     
