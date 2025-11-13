@@ -727,10 +727,16 @@ class ErrorAnalysisWorkflow:
         """Prepare context for LLM analysis"""
         context = {
             'error_info': {
-                'type': state['parsed_error'].error_type if state['parsed_error'] else None,
-                'file': state['parsed_error'].file_path if state['parsed_error'] else None,
-                'line': state['parsed_error'].line_number if state['parsed_error'] else None,
-                'message': state['raw_error']
+                'message': state['raw_error'],
+                'parsed_details': [
+                    {
+                        'type': parsed_error.error_type,
+                        'file': parsed_error.file_path,
+                        'line': parsed_error.line_number
+                    }
+                    for parsed_error in state["parsed_errors"]
+                    if parsed_error is not None
+                ]
             },
             'function_context': {
                 'name': state['target_function'].name if state['target_function'] else None,
