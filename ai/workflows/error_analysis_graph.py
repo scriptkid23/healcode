@@ -657,6 +657,7 @@ class ErrorAnalysisWorkflow:
             async def _analyze_file(file_path: str) -> Dependent:
                 chain = await self.zoekt_manager.analyze_dependency_chain(file_path) # type: ignore
                 dep_tree = chain.get('dependency_tree', {})
+                print(dep_tree)
                 target_info = dep_tree.get(file_path, {}) if isinstance(dep_tree, dict) else {}
 
                 importers = list(target_info.get('importers', []) or [])
@@ -705,6 +706,7 @@ class ErrorAnalysisWorkflow:
 
                 fully_cached = False
                 dependent = await _analyze_file(file_path)
+                print(dependent)
                 dependents.append(dependent)
                 aggregated_files.update(dependent.dependent_files)
                 total_usage_contexts += dependent.usage_contexts_count

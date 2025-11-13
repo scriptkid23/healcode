@@ -62,8 +62,8 @@ class Dependent:
     :var formats: Description
     """
     file_path: str
-    import_dependencies: List[DependencyInfo]
     dependent_files: List[str]
+    import_dependencies: List[DependencyInfo]
     usage_contexts: List[UsageContext]
     @property
     def import_dependencies_count(self) -> int:
@@ -154,23 +154,25 @@ class ErrorContextCollector:
         #         variable_or_symbol=""  # Will be extracted from context
         #     )
         # Pattern4: Python
-        # pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
-        # match = re.search(pattern4, error_input)
-        # if match:
-        #     file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
-        #     return ErrorInfo(
-        #         file_path=file_path,
-        #         line_number=int(match.group(2)),
-        #         error_type=match.group(3),
-        #         variable_or_symbol="",
-        #         column_number=None
-        #     )
+        pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
+        matches = re.finditer(pattern4, error_input)
+        if matches:
+            for match in matches:
+                file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+                error = ErrorInfo(
+                    file_path=file_path,
+                    line_number=int(match.group(2)),
+                    error_type=match.group(3),
+                    variable_or_symbol="",
+                    column_number=None
+                )
+                errors_list.append(error)
 
         pattern5 = r"([^:\s]+):(\d+): \w+: (.*?)\s+.*?\^"
         matches = re.finditer(pattern5, error_input)
         if matches:
             for match in matches:
-                file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+                file_path = "./codebase/" + await self._find_correct_file_path("codebase", match.group(1))
                 error = ErrorInfo(
                     file_path=file_path, # type: ignore
                     line_number=int(match.group(2)),
@@ -296,9 +298,8 @@ class ErrorContextCollector:
         results_fallback = await self.zoekt_client.search_by_filename(
             filename=fallback_name
         )
-        
-        if results_fallback and results_fallback[0].get("FileCount", 0) > 0:
-            return results_fallback[0]["Files"][0]["FileName"]
+        if results_fallback and len(results_fallback) > 0:
+            return results_fallback[0]["FileName"]
         
         # Give up, return the best guess we had
         return path_guess
