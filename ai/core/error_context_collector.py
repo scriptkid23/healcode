@@ -417,3 +417,80 @@ class ErrorContextCollector:
             formatted += f"\n## Dependencies\n{context.dependency_info['imports']}\n"
         
         return formatted 
+    
+    def format_json_return(self):
+        return f"""
+STRICT OUTPUT FORMAT:
+- Return only the JSON value that conforms to the schema. Do not include any additional text, explanations, or wrappers.
+- The response must be a single, valid JSON object.
+
+Here is the output schema:
+
+{{
+  "$defs": {{
+    "FileFixDetail": {{
+      "properties": {{
+        "file_path": {{
+          "description": "The relative path to the file that needs to be fixed.",
+          "title": "File Path",
+          "type": "string"
+        }},
+        "line_numbers": {{
+          "description": "A list of line numbers in this file that need to be replaced.",
+          "items": {{"type": "integer"}},
+          "title": "Line Numbers",
+          "type": "array"
+        }},
+        "new_contents": {{
+          "description": "A corresponding list of new code lines. The line at line_numbers[i] must be replaced with new_contents[i].",
+          "items": {{"type": "string"}},
+          "title": "New Contents",
+          "type": "array"
+        }}
+      }},
+      "required": ["file_path", "line_numbers", "new_contents"],
+      "title": "FileFixDetail",
+      "type": "object"
+    }},
+    "CodeFixMetadata": {{
+      "properties": {{
+        "total_lines_analyzed": {{
+          "description": "The total number of lines analyzed.",
+          "title": "Total Lines Analyzed",
+          "type": "integer"
+        }},
+        "processing_time_ms": {{
+          "description": "The time in milliseconds it took the model to process the request.",
+          "title": "Processing Time Ms",
+          "type": "integer"
+        }},
+        "model_used": {{
+          "description": "The name of the language model used.",
+          "title": "Model Used",
+          "type": "string"
+        }}
+      }},
+      "required": ["total_lines_analyzed", "processing_time_ms", "model_used"],
+      "title": "CodeFixMetadata",
+      "type": "object"
+    }}
+  }},
+  "properties": {{
+    "file_fixes": {{
+      "description": "A list of files to fix. Each item contains the file path and the corresponding lists of lines and new content.",
+      "items": {{"$ref": "#/$defs/FileFixDetail"}},
+      "title": "File Fixes",
+      "type": "array"
+    }},
+    "explanation": {{
+      "description": "A high-level, human-readable summary from the AI explaining what was wrong and how it was fixed.",
+      "title": "Explanation",
+      "type": "string"
+    }},
+    "metadata": {{
+      "$ref": "#/$defs/CodeFixMetadata"
+    }}
+  }},
+  "required": ["file_fixes", "explanation", "metadata"]
+}}
+"""

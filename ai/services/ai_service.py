@@ -151,7 +151,7 @@ Your task is to provide a comprehensive fix based on this rich context. Consider
 Provide a detailed analysis with specific fixes and high confidence based on the enhanced context.
 """
 
-    async def debug_and_fix_with_context(self, error_input: str, error_info: ErrorInfo) -> Dict[str, Any]:
+    async def debug_and_fix_with_context(self, error_input: str, error_info: List[ErrorInfo]) -> Dict[str, Any]:
         """
         Enhanced debug and fix method that uses comprehensive context analysis
         
@@ -200,21 +200,12 @@ Provide a detailed analysis with specific fixes and high confidence based on the
             # Fallback to original method
             return await self._fallback_debug_and_fix(error_input, error_info)
 
-    async def _fallback_debug_and_fix(self, error_input: str, error_info: ErrorInfo) -> Dict[str, Any]:
+    async def _fallback_debug_and_fix(self, error_input: str, error_info: List[ErrorInfo]) -> Dict[str, Any]:
         """Fallback to original debug method if enhanced analysis fails"""
         
         try:            
-            # Read the file content
-            file_content = await self.error_context_collector._get_file_content(error_info.file_path)
-            
-            result = await self.chain.ainvoke(error_input)
-            
-            # Add fallback indicator
-            result["context_metadata"] = {
-                "fallback_used": True,
-                "error_file": error_info.file_path,
-                "error_line": error_info.line_number
-            }
+            # Read the file content            
+            result = await self.chain.ainvoke(error_input + self.error_context_collector.format_json_return())
             
             return result
             

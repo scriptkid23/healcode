@@ -23,7 +23,7 @@ from editor.service import EditorConfig, EditorService
 USING_MOCK_LANGGRAPH = False
 
 try:
-    from langgraph import StateGraph, END
+    from langgraph import StateGraph, END # type: ignore
 except ImportError:
     USING_MOCK_LANGGRAPH = True
     warnings.warn(
@@ -655,14 +655,14 @@ class ErrorAnalysisWorkflow:
                 )
 
             async def _analyze_file(file_path: str) -> Dependent:
-                chain = await self.zoekt_manager.analyze_dependency_chain(file_path)
+                chain = await self.zoekt_manager.analyze_dependency_chain(file_path) # type: ignore
                 dep_tree = chain.get('dependency_tree', {})
                 target_info = dep_tree.get(file_path, {}) if isinstance(dep_tree, dict) else {}
 
                 importers = list(target_info.get('importers', []) or [])
                 imports = list(target_info.get('imports', []) or [])
                 import_details = list(target_info.get('import_details', []) or [])
-                cross_lang_details = await self.zoekt_manager.find_cross_language_dependencies(file_path)
+                cross_lang_details = await self.zoekt_manager.find_cross_language_dependencies(file_path) # type: ignore
 
                 merged_dependencies = _convert_dependencies(import_details + list(cross_lang_details or []))
                 dependent_files = sorted(
@@ -785,7 +785,7 @@ class ErrorAnalysisWorkflow:
                     # Parse LLM response as JSON
                     try:
                         print("llm_response: " + json.dumps(llm_response, indent=2))
-                        await self._editer_code(parsed_error.file_path, llm_response) # type: ignore
+                        await self._editer_code(llm_response) # type: ignore
                         impact_analysis:ImpactAnalysis = ImpactAnalysis.convert_llm_response_to_impact(llm_response) # type: ignore
 
                     except (json.JSONDecodeError, TypeError):
@@ -903,21 +903,21 @@ class ErrorAnalysisWorkflow:
 
         return ordered
     
-    async def _editer_code(self, file_path:str, llm_response:Dict[str, Any]):
-        try:
-            print("fix: ", llm_response["new_contents"])
-            contents_value = llm_response["new_contents"]
-            new_contents = [contents_value] if not isinstance(contents_value, list) else contents_value
-            result_batch = await self.editer_manager.edit_lines( # type: ignore
-                file_path=file_path,
-                line_numbers=llm_response["line_numbers"],
-                new_contents=new_contents,
-                options=EditOptions(create_backup=True)
-            )
-            print("\nBatch edit result:", result_batch)
-        except:
-            print(f"Failed to edit file {llm_response["context_used"]["error_info"]["file"]}")
-            raise ValueError(f"Failed to edit file {llm_response["context_used"].error_info.file}")
+    async def _editer_code(self, llm_response:Dict[str, Any]):
+        file_fixes = llm_response["file_fixes"]
+        for file in file_fixes:
+            try:
+                print("fix: ", file["file_path"])
+                result_batch = await self.editer_manager.edit_lines( # type: ignore
+                    file_path=file["file_path"],
+                    line_numbers=file["line_numbers"],
+                    new_contents=file["new_contents"],
+                    options=EditOptions(create_backup=True)
+                )
+                print("\nBatch edit result:", result_batch)
+            except:
+                print(f"Failed to edit file {llm_response["context_used"]["error_info"]["file"]}")
+                raise ValueError(f"Failed to edit file {llm_response["context_used"].error_info.file}")
 
     def _create_fallback_analysis(self, state: AnalysisState) -> ImpactAnalysis:
         """Create fallback analysis when LLM fails"""
