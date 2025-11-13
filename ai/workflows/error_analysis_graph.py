@@ -662,14 +662,22 @@ class ErrorAnalysisWorkflow:
 
                 importers = list(target_info.get('importers', []) or [])
                 imports = list(target_info.get('imports', []) or [])
-                import_details = list(target_info.get('import_details', []) or [])
+                outgoing_details = list(target_info.get('imports_details', []) or [])
                 cross_lang_details = await self.zoekt_manager.find_cross_language_dependencies(file_path) # type: ignore
 
-                merged_dependencies = _convert_dependencies(import_details + list(cross_lang_details or []))
+                merged_dependencies = _convert_dependencies(outgoing_details)
                 dependent_files = sorted(
-                    set(importers) |
-                    set(imports) |
+                    {imp for imp in imports if imp} |
                     {dep.resolved_path for dep in merged_dependencies if dep.resolved_path}
+                )
+
+                usage_sources = sorted(
+                    set(importers) |
+                    {
+                        dep.file_path
+                        for dep in list(cross_lang_details or [])
+                        if getattr(dep, 'file_path', None)
+                    }
                 )
 
                 usage_contexts = [
@@ -681,7 +689,7 @@ class ErrorAnalysisWorkflow:
                         usage_type="import_reference",
                         score=0.0,
                     )
-                    for importer in sorted(set(importers))
+                    for importer in usage_sources
                 ]
 
                 return Dependent(

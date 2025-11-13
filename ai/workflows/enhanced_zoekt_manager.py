@@ -141,14 +141,15 @@ class EnhancedZoektSearchManager(ZoektSearchManager):
             importers = await self.find_file_imports(file_path, language)
 
             # Find files that this file imports
-            imported_files = await self._find_files_imported_by(file_path, language)
+            imported_files, import_details_outgoing = await self._find_files_imported_by(file_path, language)
             
             dependency_tree[file_path] = {
                 'depth': current_depth,
                 'language': language,
                 'importers': [dep.file_path for dep in importers],
                 'imports': imported_files,
-                'import_details': importers
+                'import_details': importers,
+                'imports_details': import_details_outgoing
             }
             
             # Recursively analyze importers
@@ -331,33 +332,42 @@ class EnhancedZoektSearchManager(ZoektSearchManager):
         
         return 'unknown'
     
-    async def _find_files_imported_by(self, file_path: str, language: str) -> List[str]:
-        """Find files that are imported by the given file"""
+    async def _find_files_imported_by(self, file_path: str, language: str) -> Tuple[List[str], List[DependencyInfo]]:
+        """Find files that are imported by the given file along with line-level details"""
         try:
             # Read the file content to analyze its imports
             resolved_path = self._resolve_path_for_io(file_path)
             with open(resolved_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            imported_files = []
+            imported_files: List[str] = []
+            import_details: List[DependencyInfo] = []
             patterns = self.import_patterns.get(language, [])
             
-            for line in content.split('\n'):
+            for idx, line in enumerate(content.split('\n'), start=1):
                 for pattern in patterns:
                     match = re.search(pattern, line)
                     if match:
                         imported_name = match.group(1)
                         # Convert import name to potential file path
                         potential_file = self._resolve_import_to_file(imported_name, file_path, language)
-                        if potential_file:
-                            normalized_import = self._normalize_dependency_path(potential_file)
-                            imported_files.append(normalized_import or potential_file)
+                        normalized_import = self._normalize_dependency_path(potential_file) if potential_file else imported_name
+                        import_entry_path = normalized_import or potential_file or imported_name
+                        imported_files.append(import_entry_path)
+                        import_details.append(
+                            DependencyInfo(
+                                file_path=import_entry_path,
+                                import_type=self._determine_import_type(line, language),
+                                line_number=idx,
+                                import_statement=line.strip()
+                            )
+                        )
             
-            return imported_files
+            return imported_files, import_details
             
         except Exception as e:
             print(f"Failed to analyze imports in {file_path}: {e}")
-            return []
+            return [], []
     
     def _resolve_import_to_file(self, import_name: str, current_file: str, language: str) -> Optional[str]:
         """Resolve an import statement to an actual file path"""
