@@ -12,7 +12,7 @@ import uuid
 import json
 import re
 import warnings
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Set, Tuple
 from pathlib import Path
 import psutil
 import traceback
@@ -77,7 +77,14 @@ from ai.workflows.config import LanguageConfig, WorkflowConfig
 from ai.workflows.enhanced_parsers import MultiLanguageFunctionAnalyzer
 from ai.workflows.enhanced_zoekt_manager import EnhancedZoektSearchManager
 from ai.workflows.few_shot_examples import FewShotExampleManager
-from ai.core.error_context_collector import ErrorContextCollector, ErrorInfo, FunctionContext
+from ai.core.error_context_collector import (
+    Dependent,
+    DependencyInfo as CollectorDependencyInfo,
+    ErrorContextCollector,
+    ErrorInfo,
+    FunctionContext,
+    UsageContext,
+)
 from ai.services.ai_service import AIService
 from indexer.zoekt_client import ZoektClient
 class SecurityManager:
@@ -371,7 +378,7 @@ class ErrorAnalysisWorkflow:
         
         try:
             # Execute the workflow
-            final_state = await self.compiled_graph.ainvoke(initial_state)
+            final_state = await self.compiled_graph.ainvoke(initial_state) # type: ignore
             
             # Update final metrics
             final_state['metrics'].completed_at = time.time()
@@ -385,7 +392,7 @@ class ErrorAnalysisWorkflow:
                 final_state['metrics'].cache_hit_rate = final_state['cache_hits'] / total_cache_operations
             
             # Convert to JSON output
-            return state_to_json_output(final_state)
+            return state_to_json_output(final_state) # type: ignore
             
         except Exception as e:
             # Handle workflow-level errors
@@ -413,13 +420,13 @@ class ErrorAnalysisWorkflow:
                 node_context['cache_hit'] = True
             else:
                 # Parse the error
-                parsed_errors = await self.error_collector.parse_error_input(state['raw_error'])
+                parsed_errors = await self.error_collector.parse_error_input(state['raw_error']) # type: ignore
                 print(parsed_errors)
                 
                 # Sanitize sensitive information
-                if parsed_errors and hasattr(parsed_errors, 'context') and parsed_errors.context:
-                    sanitized_context, redactions = self.security_manager.sanitize_content(parsed_errors.context)
-                    parsed_errors.context = sanitized_context
+                if parsed_errors and hasattr(parsed_errors, 'context') and parsed_errors.context: # type: ignore
+                    sanitized_context, redactions = self.security_manager.sanitize_content(parsed_errors.context) # type: ignore
+                    parsed_errors.context = sanitized_context # type: ignore
                     
                     if redactions:
                         state['sensitive_data_detected'] = True
@@ -440,7 +447,7 @@ class ErrorAnalysisWorkflow:
             
         except Exception as e:
             return await self._handle_node_error(
-                state, "parse_error", str(e), node_context, retry_count
+                state, "parse_error", str(e), node_context
             )
     
     async def _parse_file_node(self, state: AnalysisState) -> AnalysisState:
@@ -538,8 +545,9 @@ class ErrorAnalysisWorkflow:
     
     async def _find_dependencies_node(self, state: AnalysisState) -> AnalysisState:
         """
-        Node 3: Find file dependencies and import relationships
-        Uses only EnhancedZoektSearchManager methods:
+        Node 3: Find file dependencies and import relationships.
+
+        Builds Dependent objects for each affected file using EnhancedZoektSearchManager:
         - analyze_dependency_chain
         - find_file_imports
         - find_cross_language_dependencies
@@ -549,92 +557,173 @@ class ErrorAnalysisWorkflow:
         retry_count = self._get_retry_count(state, node_name)
 
         try:
-            # Sanity checks
-            if not state.get('parsed_error'):
+            if not state.get('affected_functions'):
                 raise ValueError("No parsed error information available")
 
-            parsed_error = state['parsed_errors']
-            if not getattr(parsed_error, 'file_path', None):
-                state['warnings'].append("No file path available for dependency analysis")
+            unique_files_to_scan: Set[str] = {
+                func.file_path for func in state['affected_functions']
+                if getattr(func, 'file_path', None)
+            }
+
+            if not unique_files_to_scan:
+                state['warnings'].append("No file paths found in affected functions.")
+                state['affected_dependents'] = []
                 return state
 
-            # Cache look-up
-            cache_key = f"dependencies:{parsed_error.file_path}" # type: ignore
-            cached_result = await self.cache_manager.get(cache_key)
-            if cached_result:
-                state['import_dependencies'] = cached_result.get('import_dependencies', [])
-                state['dependent_files'] = cached_result.get('dependent_files', [])
-                state['usage_contexts'] = cached_result.get('usage_contexts', [])
-                state['cache_hits'] += 1
-                node_context['cache_hit'] = True
-
-                metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
-                state['metrics'].node_metrics.append(metrics)
-                self._reset_retry_count(state, node_name)
-                return state
-
-            # No cache → compute
             if not self.zoekt_manager:
                 raise ValueError("Zoekt manager not initialized")
-            
 
-            target_file = parsed_error.file_path # type: ignore
+            dependents: List[Dependent] = []
+            aggregated_files: Set[str] = set()
+            total_usage_contexts = 0
+            total_import_dependencies = 0
+            fully_cached = True
 
-            # 1) Full dependency chain (provides importers/imports for the target)
-            chain = await self.zoekt_manager.analyze_dependency_chain(target_file)
-            dep_tree = chain.get('dependency_tree', {})
-            target_info = dep_tree.get(target_file, {}) if isinstance(dep_tree, dict) else {}
+            def _convert_dependencies(records: List[Any]) -> List[CollectorDependencyInfo]:
+                converted: List[CollectorDependencyInfo] = []
+                seen: Set[Tuple[str, int, str]] = set()
 
-            importers = list(target_info.get('importers', []) or [])
-            imports = list(target_info.get('imports', []) or [])
-            import_details = list(target_info.get('import_details', []) or [])
+                for record in records or []:
+                    import_name = (
+                        getattr(record, 'import_statement', None)
+                        or getattr(record, 'import_name', None)
+                        or getattr(record, 'statement', None)
+                        or ''
+                    )
+                    resolved_path = (
+                        getattr(record, 'file_path', None)
+                        or getattr(record, 'resolved_path', None)
+                        or getattr(record, 'path', None)
+                        or ''
+                    )
+                    line_number = getattr(record, 'line_number', None) or getattr(record, 'line', None) or 0
+                    key = (resolved_path, line_number, import_name)
 
-            # 2) Cross-language dependencies (who imports this file across languages)
-            cross_lang_details = await self.zoekt_manager.find_cross_language_dependencies(target_file)
+                    if resolved_path and key in seen:
+                        continue
+                    if resolved_path:
+                        seen.add(key)
 
-            # 3) Merge & dedupe import dependency details by file_path
-            def _dep_file_path(dep):
-                # DependencyInfo is expected to have 'file_path'
-                return getattr(dep, 'file_path', None) or getattr(dep, 'path', None)
+                    converted.append(
+                        CollectorDependencyInfo(
+                            import_name=import_name or resolved_path,
+                            resolved_path=resolved_path,
+                            line_number=line_number or 0,
+                        )
+                    )
 
-            merged_details = list(import_details) + list(cross_lang_details)
-            seen_paths = set()
-            import_dependencies = []
-            for dep in merged_details:
-                fp = _dep_file_path(dep)
-                if not fp or fp in seen_paths:
+                return converted
+
+            def _convert_usage_contexts(raw_contexts: Any) -> List[UsageContext]:
+                contexts: List[UsageContext] = []
+                if isinstance(raw_contexts, list):
+                    for ctx in raw_contexts:
+                        if isinstance(ctx, UsageContext):
+                            contexts.append(ctx)
+                            continue
+                        file_path = ctx if isinstance(ctx, str) else (
+                            ctx.get('file_path') or ctx.get('file') or ""
+                        )
+                        contexts.append(
+                            UsageContext(
+                                file_path=file_path,
+                                line_number=ctx.get('line_number', 0) if isinstance(ctx, dict) else 0,
+                                context_before=ctx.get('context_before', "") if isinstance(ctx, dict) else "",
+                                context_after=ctx.get('context_after', "") if isinstance(ctx, dict) else "",
+                                usage_type=ctx.get('usage_type', "import_reference") if isinstance(ctx, dict) else "import_reference",
+                                score=ctx.get('score', 0.0) if isinstance(ctx, dict) else 0.0,
+                            )
+                        )
+                return contexts
+
+            def _from_cache(file_path: str, payload: Any) -> Dependent:
+                if isinstance(payload, Dependent):
+                    return payload
+
+                import_deps = _convert_dependencies(payload.get('import_dependencies', []) if isinstance(payload, dict) else [])
+                usage_contexts = _convert_usage_contexts(payload.get('usage_contexts', []) if isinstance(payload, dict) else [])
+                dependent_files = (
+                    list(payload.get('dependent_files', []))
+                    if isinstance(payload, dict) else []
+                )
+
+                return Dependent(
+                    file_path=file_path,
+                    import_dependencies=import_deps,
+                    dependent_files=dependent_files,
+                    usage_contexts=usage_contexts,
+                )
+
+            async def _analyze_file(file_path: str) -> Dependent:
+                chain = await self.zoekt_manager.analyze_dependency_chain(file_path)
+                dep_tree = chain.get('dependency_tree', {})
+                target_info = dep_tree.get(file_path, {}) if isinstance(dep_tree, dict) else {}
+
+                importers = list(target_info.get('importers', []) or [])
+                imports = list(target_info.get('imports', []) or [])
+                import_details = list(target_info.get('import_details', []) or [])
+                cross_lang_details = await self.zoekt_manager.find_cross_language_dependencies(file_path)
+
+                merged_dependencies = _convert_dependencies(import_details + list(cross_lang_details or []))
+                dependent_files = sorted(
+                    set(importers) |
+                    set(imports) |
+                    {dep.resolved_path for dep in merged_dependencies if dep.resolved_path}
+                )
+
+                usage_contexts = [
+                    UsageContext(
+                        file_path=importer,
+                        line_number=0,
+                        context_before="",
+                        context_after="",
+                        usage_type="import_reference",
+                        score=0.0,
+                    )
+                    for importer in sorted(set(importers))
+                ]
+
+                return Dependent(
+                    file_path=file_path,
+                    import_dependencies=merged_dependencies,
+                    dependent_files=dependent_files,
+                    usage_contexts=usage_contexts,
+                )
+
+            for file_path in unique_files_to_scan:
+                cache_key = f"dependencies:{file_path}"
+                cached_result = await self.cache_manager.get(cache_key)
+
+                if cached_result:
+                    dependent = _from_cache(file_path, cached_result)
+                    dependents.append(dependent)
+                    aggregated_files.update(dependent.dependent_files)
+                    total_usage_contexts += dependent.usage_contexts_count
+                    total_import_dependencies += dependent.import_dependencies_count
+                    state['cache_hits'] += 1
                     continue
-                seen_paths.add(fp)
-                import_dependencies.append(dep)
 
-            # 4) Dependent files = importers ∪ imports ∪ paths from import_dependencies
-            dep_files_from_details = [p for p in seen_paths]
-            dependent_files = sorted(set(importers) | set(imports) | set(dep_files_from_details))
+                fully_cached = False
+                dependent = await _analyze_file(file_path)
+                dependents.append(dependent)
+                aggregated_files.update(dependent.dependent_files)
+                total_usage_contexts += dependent.usage_contexts_count
+                total_import_dependencies += dependent.import_dependencies_count
 
-            # 5) Usage contexts (best-effort):
-            #    If we don't have function-level usages, consider files that import the target
-            #    as usage contexts (string list of file paths to stay backward-compatible).
-            usage_contexts = sorted(set(importers))
+                await self.cache_manager.set(cache_key, dependent)
+                state['cache_misses'] += 1
+                state['cache_keys'].append(cache_key)
 
-            # Write back to state
-            state['import_dependencies'] = import_dependencies
-            state['dependent_files'] = dependent_files
-            state['usage_contexts'] = usage_contexts
-            state['cache_misses'] += 1
+            state['affected_dependents'] = dependents
 
-            # Cache the result
-            cache_data = {
-                'import_dependencies': import_dependencies,
-                'dependent_files': dependent_files,
-                'usage_contexts': usage_contexts
-            }
-            await self.cache_manager.set(cache_key, cache_data)
-            state['cache_keys'].append(cache_key)
+            if not dependents:
+                state['warnings'].append("No dependents discovered for affected files.")
 
-            # Metrics
-            node_context['dependent_files_count'] = len(dependent_files)
-            node_context['import_dependencies_count'] = len(import_dependencies)
-            node_context['usage_contexts_count'] = len(usage_contexts)
+            node_context['cache_hit'] = fully_cached and bool(dependents)
+            node_context['dependent_targets'] = len(dependents)
+            node_context['dependent_files_count'] = len(aggregated_files)
+            node_context['import_dependencies_count'] = total_import_dependencies
+            node_context['usage_contexts_count'] = total_usage_contexts
 
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
@@ -691,7 +780,7 @@ class ErrorAnalysisWorkflow:
                     
                     print("fix error: " + user_prompt)
                     
-                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt, state["parsed_error"]) # type: ignore
+                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt, state["parsed_errors"]) # type: ignore
                     
                     # Parse LLM response as JSON
                     try:
@@ -701,9 +790,10 @@ class ErrorAnalysisWorkflow:
 
                     except (json.JSONDecodeError, TypeError):
                         # Fallback: create basic impact analysis
+                        unique_dependents = self._collect_unique_dependent_files(state)
                         impact_analysis = ImpactAnalysis(
                             risk_level="medium",
-                            affected_files=state['dependent_files'][:5],
+                            affected_files=unique_dependents[:5],
                             fix_suggestions=llm_response["error_input"],
                             breaking_changes=[],
                             test_recommendations=["Add unit tests for the fixed function"],
@@ -762,12 +852,35 @@ class ErrorAnalysisWorkflow:
                 }
                 for func in state["affected_functions"]
             ],
-            'dependencies': {
-                'dependent_files_count': len(state['dependent_files']),
-                'dependent_files': state['dependent_files'][:10],  # Limit for context
-                'usage_contexts_count': len(state['usage_contexts']),
-                'import_types': list(set(dep.import_type for dep in state['import_dependencies']))
-            },
+            "dependencies": [
+                {
+                    "file_path": dependent.file_path,
+                    "dependent_files": dependent.dependent_files,
+                    "dependent_files_count": dependent.dependent_files_count,
+                    
+                    "import_dependencies": [
+                        {
+                            "import_name": dep.import_name,
+                            "resolved_path": dep.resolved_path,
+                            "line_number": dep.line_number
+                        } for dep in dependent.import_dependencies
+                    ],
+                    "import_dependencies_count": dependent.import_dependencies_count,
+                    
+                    "usage_contexts": [
+                        {
+                            "file_path": usage.file_path,
+                            "line_number": usage.line_number,
+                            "context_before": usage.context_before,
+                            "context_after": usage.context_after,
+                            "usage_type": usage.usage_type,
+                            "score": usage.score
+                        } for usage in dependent.usage_contexts[:5] 
+                    ],
+                    "usage_contexts_count": dependent.usage_contexts_count
+                }
+                for dependent in state.get("affected_dependents", [])
+            ],
             'workflow_context': {
                 'workflow_id': state['workflow_id'],
                 'sensitive_data_detected': state['sensitive_data_detected'],
@@ -776,6 +889,19 @@ class ErrorAnalysisWorkflow:
         }
         
         return context
+
+    def _collect_unique_dependent_files(self, state: AnalysisState) -> List[str]:
+        """Collect ordered unique list of dependent file paths."""
+        seen: Set[str] = set()
+        ordered: List[str] = []
+
+        for dependent in state.get('affected_dependents', []):
+            for file_path in getattr(dependent, 'dependent_files', []) or []:
+                if file_path and file_path not in seen:
+                    seen.add(file_path)
+                    ordered.append(file_path)
+
+        return ordered
     
     async def _editer_code(self, file_path:str, llm_response:Dict[str, Any]):
         try:
@@ -796,8 +922,9 @@ class ErrorAnalysisWorkflow:
     def _create_fallback_analysis(self, state: AnalysisState) -> ImpactAnalysis:
         """Create fallback analysis when LLM fails"""
         # Simple heuristic-based analysis
-        dependent_files = state['dependent_files']
-        usage_count = len(state['usage_contexts'])
+        dependents = state.get('affected_dependents', [])
+        dependent_files = self._collect_unique_dependent_files(state)
+        usage_count = sum(dep.usage_contexts_count for dep in dependents)
         
         # Determine risk level based on usage
         if usage_count > 10:
@@ -809,8 +936,9 @@ class ErrorAnalysisWorkflow:
         
         # Basic fix suggestions
         fix_suggestions = []
-        if state['parsed_error']:
-            error_type = state['parsed_error'].error_type
+        parsed_error = state['parsed_errors'][0] if state.get('parsed_errors') else None
+        if parsed_error:
+            error_type = parsed_error.error_type
             if "null" in error_type.lower():
                 fix_suggestions.append("Add null checks before accessing object properties/methods")
             elif "undefined" in error_type.lower():

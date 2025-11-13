@@ -33,6 +33,17 @@ class FunctionContext:
     parameters: List[str] = None
 
 @dataclass
+class DependencyInfo:
+    """
+    Docstring for DependencyInfo
+    
+    :var formats: Description
+    """
+    import_name: str
+    resolved_path: str
+    line_number: int
+
+@dataclass
 class UsageContext:
     """Context about function usage in other files"""
     file_path: str
@@ -41,6 +52,30 @@ class UsageContext:
     context_after: str
     usage_type: str  # 'call', 'import', 'reference'
     score: float
+
+
+@dataclass
+class Dependent:
+    """
+    Docstring for Dependent
+    
+    :var formats: Description
+    """
+    file_path: str
+    import_dependencies: List[DependencyInfo]
+    dependent_files: List[str]
+    usage_contexts: List[UsageContext]
+    @property
+    def import_dependencies_count(self) -> int:
+        return len(self.import_dependencies)
+    
+    @property
+    def dependent_files_count(self) -> int:
+        return len(self.dependent_files)
+
+    @property
+    def usage_contexts_count(self) -> int:
+        return len(self.usage_contexts)
 
 @dataclass
 class EnhancedContext:

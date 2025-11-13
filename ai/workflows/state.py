@@ -8,7 +8,7 @@ from typing import TypedDict, Optional, List, Dict, Any
 from dataclasses import dataclass
 import time
 
-from ai.core.error_context_collector import ErrorInfo, FunctionContext, UsageContext
+from ai.core.error_context_collector import Dependent, ErrorInfo, FunctionContext, UsageContext
 
 @dataclass
 class DependencyInfo:
@@ -124,9 +124,7 @@ class AnalysisState(TypedDict):
     affected_functions: List[FunctionContext]
 
     # Dependency Analysis
-    dependent_files: List[str]  # Files that import/use the target file
-    import_dependencies: List[DependencyInfo]  # Detailed import information
-    usage_contexts: List[UsageContext]  # How the function is used
+    affected_dependents: List[Dependent]
     
     # Impact Analysis
     impact_analysis: Optional[ImpactAnalysis]
@@ -177,9 +175,7 @@ def create_initial_state(raw_error: str, workflow_id: str, config: Dict[str, Any
         affected_functions=[],
         
         # Dependency Analysis
-        dependent_files=[],
-        import_dependencies=[],
-        usage_contexts=[],
+        affected_dependents=[],
         
         # Impact Analysis
         impact_analysis=None,
@@ -251,26 +247,35 @@ def state_to_json_output(state: AnalysisState) -> Dict[str, Any]:
             }
             for func in state["affected_functions"]
         ],
-        "dependencies": {
-            "dependent_files": state["dependent_files"],
-            "import_dependencies": [
-                {
-                    "file": dep.file_path,
-                    "type": dep.import_type,
-                    "line": dep.line_number,
-                    "statement": dep.import_statement
-                } for dep in state["import_dependencies"]
-            ],
-            "usage_contexts": len(state["usage_contexts"]),
-            "usage_summary": [
-                {
-                    "file": usage.file_path,
-                    "line": usage.line_number,
-                    "type": usage.usage_type,
-                    "score": usage.score
-                } for usage in state["usage_contexts"][:5]  # Top 5 usages
-            ]
-        },
+        "dependencies": [
+            {
+                "file_path": dependent.file_path,
+                "dependent_files": dependent.dependent_files,
+                "dependent_files_count": dependent.dependent_files_count,
+                
+                "import_dependencies": [
+                    {
+                        "import_name": dep.import_name,
+                        "resolved_path": dep.resolved_path,
+                        "line_number": dep.line_number
+                    } for dep in dependent.import_dependencies
+                ],
+                "import_dependencies_count": dependent.import_dependencies_count,
+                
+                "usage_contexts": [
+                    {
+                        "file_path": usage.file_path,
+                        "line_number": usage.line_number,
+                        "context_before": usage.context_before,
+                        "context_after": usage.context_after,
+                        "usage_type": usage.usage_type,
+                        "score": usage.score
+                    } for usage in dependent.usage_contexts[:5] 
+                ],
+                "usage_contexts_count": dependent.usage_contexts_count
+            }
+            for dependent in state.get("affected_dependents", [])
+        ],
         "impact_analysis": {
             "risk_level": state["impact_analysis"].risk_level if state["impact_analysis"] else "unknown",
             "affected_files": state["impact_analysis"].affected_files if state["impact_analysis"] else [],
