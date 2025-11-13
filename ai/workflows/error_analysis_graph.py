@@ -77,7 +77,7 @@ from ai.workflows.config import LanguageConfig, WorkflowConfig
 from ai.workflows.enhanced_parsers import MultiLanguageFunctionAnalyzer
 from ai.workflows.enhanced_zoekt_manager import EnhancedZoektSearchManager
 from ai.workflows.few_shot_examples import FewShotExampleManager
-from ai.core.error_context_collector import ErrorContextCollector, ErrorInfo
+from ai.core.error_context_collector import ErrorContextCollector, ErrorInfo, FunctionContext
 from ai.services.ai_service import AIService
 from indexer.zoekt_client import ZoektClient
 class SecurityManager:
@@ -452,65 +452,83 @@ class ErrorAnalysisWorkflow:
         retry_count = self._get_retry_count(state, node_name)
         
         try:
-            if not state['parsed_error']:
+            if not state['parsed_errors']:
                 raise ValueError("No parsed error information available")
             
-            parsed_error = state['parsed_error']
+            parsed_errors = state['parsed_errors']
+            cache_key = ""
+            unique_functions_tracker: Dict[str, FunctionContext] = {}
+            file_content_cache: Dict[str, str] = {}
+            affected_functions:List[FunctionContext] = []
             
             # Check if we have file and line information
-            if not parsed_error.file_path or not parsed_error.line_number:
-                state['warnings'].append("Insufficient file/line information for function analysis")
-                return state
-            
-            # Check cache
-            cache_key = f"parse_file:{parsed_error.file_path}:{parsed_error.line_number}"
-            cached_result = await self.cache_manager.get(cache_key)
-            
-            if cached_result:
-                state['target_function'] = cached_result
-                state['cache_hits'] += 1
-                node_context['cache_hit'] = True
-            else:
-                # Read the file
-                try:
-                    with open(parsed_error.file_path, 'r', encoding='utf-8') as f:
-                        file_content = f.read()
-                except FileNotFoundError:
-                    raise ValueError(f"File not found: {parsed_error.file_path}")
+            for parsed_error in parsed_errors:
+                if not parsed_error.file_path or not parsed_error.line_number:
+                    state['warnings'].append("Insufficient file/line information for function analysis")
+                    return state
                 
-                # Check memory usage
-                memory_usage = self.security_manager.check_memory_usage()
-                if memory_usage > self.config.security.max_memory_mb:
-                    raise MemoryError(f"Memory usage {memory_usage}MB exceeds limit")
-                
-                # Sanitize file content
-                sanitized_content, redactions = self.security_manager.sanitize_content(file_content)
-                if redactions:
-                    state['sensitive_data_detected'] = True
-                    state['sanitized_content'].update(redactions)
-                
-                # Analyze function at target line
-                if self.function_analyzer:
-                    function_context = self.function_analyzer.analyze_function_at_line(
-                        sanitized_content,
-                        parsed_error.file_path,
-                        parsed_error.line_number
-                    )
-                    
-                    state['target_function'] = function_context
-                    state['cache_misses'] += 1
-                    
-                    # Cache the result
-                    await self.cache_manager.set(cache_key, function_context)
-                    state['cache_keys'].append(cache_key)
+                # Check cache
+                cache_key = f"parse_file:{parsed_error.file_path}:{parsed_error.line_number}"
+                cached_result = await self.cache_manager.get(cache_key)
+
+                function_context: Optional[FunctionContext] = None
+                # Cache the result
+                if cached_result:
+                    state['affected_functions'] = cached_result
+                    state['cache_hits'] += 1
+                    node_context['cache_hit'] = True
                 else:
-                    raise ValueError("Function analyzer not initialized")
+                    state['cache_misses'] += 1   
+                    sanitized_content = ""
+                    file_path = parsed_error.file_path
+
+                    # Read the file
+                    if file_path not in file_content_cache:
+                        try:
+                            with open(parsed_error.file_path, 'r', encoding='utf-8') as f:
+                                file_content = f.read()
+                        except FileNotFoundError:
+                            raise ValueError(f"File not found: {parsed_error.file_path}")
+                        
+                        # Check memory usage
+                        memory_usage = self.security_manager.check_memory_usage()
+                        if memory_usage > self.config.security.max_memory_mb:
+                            raise MemoryError(f"Memory usage {memory_usage}MB exceeds limit")
+                        
+                        # Sanitize file content
+                        content, redactions = self.security_manager.sanitize_content(file_content)
+                        if redactions:
+                            state['sensitive_data_detected'] = True
+                            state['sanitized_content'].update(redactions)
+                        file_content_cache[file_path] = content
+                        sanitized_content = content
+                    else:
+                        sanitized_content = file_content_cache[file_path]
+                    
+                    # Analyze function at target line
+                    if self.function_analyzer:
+                        function_context = self.function_analyzer.analyze_function_at_line(
+                            sanitized_content,
+                            parsed_error.file_path,
+                            parsed_error.line_number
+                        )
+                        if (function_context):
+                            affected_functions.append(function_context)
+                    else:
+                        raise ValueError("Function analyzer not initialized")
+                    
+                if function_context:
+                    func_key = f"{function_context.file_path}@{function_context.name}"
+                    if func_key not in unique_functions_tracker:
+                        unique_functions_tracker[func_key] = function_context
+                        print(function_context)
+                    
+            state['affected_functions'] = list(unique_functions_tracker.values())
             
             # Record success metrics
             metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
             state['metrics'].node_metrics.append(metrics)
             self._reset_retry_count(state, node_name)
-            
             return state
             
         except Exception as e:
@@ -535,7 +553,7 @@ class ErrorAnalysisWorkflow:
             if not state.get('parsed_error'):
                 raise ValueError("No parsed error information available")
 
-            parsed_error = state['parsed_error']
+            parsed_error = state['parsed_errors']
             if not getattr(parsed_error, 'file_path', None):
                 state['warnings'].append("No file path available for dependency analysis")
                 return state
@@ -639,17 +657,11 @@ class ErrorAnalysisWorkflow:
         try:
             # Prepare context for LLM
             context = self._prepare_llm_context(state)
-            parsed_error = state['parsed_error']
-            
-            # Get few-shot examples
-            language = None
-            if state['target_function']:
-                language = state['target_function'].language
+            parsed_error = state['parsed_errors']
             
             few_shot_prompt = self.few_shot_manager.create_few_shot_prompt(
                 state['raw_error'],
                 context,
-                language
             )
             
             # Check cache
@@ -738,15 +750,18 @@ class ErrorAnalysisWorkflow:
                     if parsed_error is not None
                 ]
             },
-            'function_context': {
-                'name': state['target_function'].name if state['target_function'] else None,
-                'signature': state['target_function'].signature if state['target_function'] else None,
-                'implementation': state['target_function'].implementation if state['target_function'] else None,
-                'start_line': state['target_function'].start_line if state['target_function'] else None,
-                'end_line': state['target_function'].end_line if state['target_function'] else None,
-                'language': state['target_function'].language if state['target_function'] else None,
-                'parameters': state['target_function'].parameters if state['target_function'] else None
-            },
+            'function_context': [
+                {
+                    "signature": func.signature,
+                    "file": func.file_path,
+                    "language": func.language,
+                    "parameters": func.parameters,
+                    "implementation": func.implementation,
+                    "start": func.start_line,
+                    "end": func.end_line,
+                }
+                for func in state["affected_functions"]
+            ],
             'dependencies': {
                 'dependent_files_count': len(state['dependent_files']),
                 'dependent_files': state['dependent_files'][:10],  # Limit for context

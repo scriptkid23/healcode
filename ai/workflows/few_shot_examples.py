@@ -407,6 +407,7 @@ fn process_data(data: &mut Vec<i32>) {
         Returns:
             FewShotPrompt with system prompt, examples, and user prompt
         """
+        print(context)
         # Get relevant examples
         examples = self.get_examples_for_error(error_text, language, max_examples=3)
         

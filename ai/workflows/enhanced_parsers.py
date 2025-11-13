@@ -189,12 +189,16 @@ class TreeSitterParser(SandboxedParser):
         """Create Java tree-sitter parser"""
         # This would be implemented with actual tree-sitter Java grammar
         # For now, we'll use a placeholder
-        raise NotImplementedError("Java tree-sitter parser not yet implemented")
+        try:
+            import tree_sitter_java as java
+            parser = Parser(Language(java.language()))
+            return parser
+        except ImportError:
+            raise NotImplementedError("Java tree-sitter parser not yet implemented")
     
     def _create_javascript_parser(self):
         """Create JavaScript tree-sitter parser"""
         # This would be implemented with actual tree-sitter JavaScript grammar
-        print(12345)
         try:
             import tree_sitter_javascript as js
             parser = Parser(Language(js.language()))
@@ -256,7 +260,7 @@ class TreeSitterParseResult:
             return (ln - 1, 0), (ln - 1, 10**9)
 
         def _text(node) -> str:
-            return self.content[node.start_byte:node.end_byte]
+            return self.content[node.start_byte:node.end_byte].decode('utf8') # type: ignore
 
         def _func_node_types(lang: str):
             js_like = {
@@ -445,7 +449,6 @@ class TreeSitterParseResult:
         func_node = _nearest_func_ancestor(node, _func_node_types(self.language))
         if func_node is None:
             return None
-
         name = _extract_name(func_node)
         params_snip = _extract_params_snippet(func_node)
         params_list = _extract_params_list(func_node)

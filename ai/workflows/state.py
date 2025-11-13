@@ -121,8 +121,8 @@ class AnalysisState(TypedDict):
     parsed_errors: List[ErrorInfo]
     
     # Function Analysis
-    target_function: Optional[FunctionContext]
-    
+    affected_functions: List[FunctionContext]
+
     # Dependency Analysis
     dependent_files: List[str]  # Files that import/use the target file
     import_dependencies: List[DependencyInfo]  # Detailed import information
@@ -171,10 +171,10 @@ def create_initial_state(raw_error: str, workflow_id: str, config: Dict[str, Any
         workflow_id=workflow_id,
         
         # Parsed Error Information
-        parsed_error=None,
+        parsed_errors=[],
         
         # Function Analysis
-        target_function=None,
+        affected_functions=[],
         
         # Dependency Analysis
         dependent_files=[],
@@ -228,22 +228,29 @@ def state_to_json_output(state: AnalysisState) -> Dict[str, Any]:
         "timestamp": time.time(),
         "error_info": {
             "raw_error": state["raw_error"],
-            "parsed_error": {
-                "type": state["parsed_error"].error_type if state["parsed_error"] else None,
-                "file": state["parsed_error"].file_path if state["parsed_error"] else None,
-                "line": state["parsed_error"].line_number if state["parsed_error"] else None,
-                "column": state["parsed_error"].column_number if state["parsed_error"] else None,
-                "variable": state["parsed_error"].variable_or_symbol if state["parsed_error"] else None
-            } if state["parsed_error"] else None
+            "parsed_errors": [
+                {
+                    "type": error.error_type,
+                    "file": error.file_path,
+                    "line": error.line_number,
+                    "column": error.column_number,
+                    "variable": error.variable_or_symbol
+                }
+                for error in state["parsed_errors"]
+            ]
         },
-        "function_context": {
-            "name": state["target_function"].name if state["target_function"] else None,
-            "file": state["target_function"].file_path if state["target_function"] else None,
-            "language": state["target_function"].language if state["target_function"] else None,
-            "signature": state["target_function"].signature if state["target_function"] else None,
-            "parameters": state["target_function"].parameters if state["target_function"] else None,
-            "documentation": state["target_function"].documentation if state["target_function"] else None
-        } if state["target_function"] else None,
+        "affected_functions": [
+            {
+                "signature": func.signature,
+                "file": func.file_path,
+                "language": func.language,
+                "parameters": func.parameters,
+                "implementation": func.implementation,
+                "start": func.start_line,
+                "end": func.end_line,
+            }
+            for func in state["affected_functions"]
+        ],
         "dependencies": {
             "dependent_files": state["dependent_files"],
             "import_dependencies": [
