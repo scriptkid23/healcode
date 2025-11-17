@@ -82,6 +82,39 @@ class ImpactAnalysis:
         )
 
 @dataclass
+class ClassField:
+    """Schema information for a class field/attribute"""
+    name: str
+    data_type: str
+    visibility: str = "public"
+
+
+@dataclass
+class MethodParameter:
+    """Schema information for a method parameter"""
+    name: str
+    data_type: str
+
+
+@dataclass
+class ClassMethod:
+    """Schema information for a class method"""
+    name: str
+    parameters: List[MethodParameter]
+    return_type: str
+    visibility: str = "public"
+
+
+@dataclass
+class ClassDefinition:
+    """Schema definition for a class within the codebase"""
+    name: str
+    file_path: str
+    fields: List[ClassField]
+    methods: List[ClassMethod]
+    parent_class: Optional[str] = None
+
+@dataclass
 class NodeMetrics:
     """Metrics for individual node execution"""
     node_name: str
@@ -125,6 +158,9 @@ class AnalysisState(TypedDict):
 
     # Dependency Analysis
     affected_dependents: List[Dependent]
+
+    # Class Structure Index
+    class_definitions: List[ClassDefinition]
     
     # Impact Analysis
     impact_analysis: Optional[ImpactAnalysis]
@@ -176,6 +212,7 @@ def create_initial_state(raw_error: str, workflow_id: str, config: Dict[str, Any
         
         # Dependency Analysis
         affected_dependents=[],
+        class_definitions=[],
         
         # Impact Analysis
         impact_analysis=None,
@@ -284,6 +321,34 @@ def state_to_json_output(state: AnalysisState) -> Dict[str, Any]:
             "test_recommendations": state["impact_analysis"].test_recommendations if state["impact_analysis"] else [],
             "confidence_score": state["impact_analysis"].confidence_score if state["impact_analysis"] else 0.0
         },
+        "class_definitions": [
+            {
+                "name": class_def.name,
+                "file_path": class_def.file_path,
+                "parent_class": class_def.parent_class,
+                "fields": [
+                    {
+                        "name": field.name,
+                        "data_type": field.data_type,
+                        "visibility": field.visibility
+                    }
+                    for field in class_def.fields
+                ],
+                "methods": [
+                    {
+                        "name": method.name,
+                        "parameters": [
+                            {"name": param.name, "data_type": param.data_type}
+                            for param in method.parameters
+                        ],
+                        "return_type": method.return_type,
+                        "visibility": method.visibility
+                    }
+                    for method in class_def.methods
+                ]
+            }
+            for class_def in state.get("class_definitions", [])
+        ],
         "metrics": {
             "total_execution_time_ms": state["metrics"].total_execution_time_ms,
             "total_memory_usage_mb": state["metrics"].total_memory_usage_mb,

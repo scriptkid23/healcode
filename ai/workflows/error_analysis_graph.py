@@ -60,7 +60,7 @@ except ImportError:
             current_state = state.copy()
             
             # Execute nodes in order
-            for node_name in ['parse_error', 'parse_file', 'find_dependencies', 'analyze_impact']:
+            for node_name in ['parse_error', 'parse_file', 'find_dependencies', 'extract_class_schemas', 'analyze_impact']:
                 if node_name in self.graph.nodes:
                     try:
                         current_state = await self.graph.nodes[node_name](current_state)
@@ -72,8 +72,16 @@ except ImportError:
     
     END = "__END__"
 
-from ai.workflows.state import AnalysisState, create_initial_state, state_to_json_output, NodeMetrics, ImpactAnalysis
+from ai.workflows.state import (
+    AnalysisState,
+    ClassDefinition,
+    create_initial_state,
+    state_to_json_output,
+    NodeMetrics,
+    ImpactAnalysis,
+)
 from ai.workflows.config import LanguageConfig, WorkflowConfig
+from ai.workflows.class_schema_extractor import ClassSchemaExtractor
 from ai.workflows.enhanced_parsers import MultiLanguageFunctionAnalyzer
 from ai.workflows.enhanced_zoekt_manager import EnhancedZoektSearchManager
 from ai.workflows.few_shot_examples import FewShotExampleManager
@@ -213,11 +221,12 @@ class ErrorAnalysisWorkflow:
     """
     Main LangGraph workflow for comprehensive error analysis
     
-    Implements a 4-node workflow:
+    Implements a 5-node workflow:
     1. parse_error: Parse and extract error information
     2. parse_file: Analyze the target file and function
     3. find_dependencies: Find imports and dependencies
-    4. analyze_impact: Perform impact analysis with LLM
+    4. extract_class_schemas: Build class index across affected files
+    5. analyze_impact: Perform impact analysis with LLM
     """
     
     def __init__(self, config: WorkflowConfig):
@@ -232,6 +241,7 @@ class ErrorAnalysisWorkflow:
         self.cache_manager = WorkflowCacheManager(config.performance.cache_ttl_seconds)
         self.few_shot_manager = FewShotExampleManager(config.few_shot_examples_path)
         self.error_collector: Optional[ErrorContextCollector] = None
+        self.class_schema_extractor: Optional[ClassSchemaExtractor] = None
         
         # Initialize AI service with validation/fallback
         self.ai_service: Optional[AIService] = self._initialize_ai_service(config)
@@ -248,6 +258,7 @@ class ErrorAnalysisWorkflow:
             "parse_error": self._parse_error_node,
             "parse_file": self._parse_file_node,
             "find_dependencies": self._find_dependencies_node,
+            "extract_class_schemas": self._extract_class_schemas_node,
             "analyze_impact": self._analyze_impact_node,
         }
 
@@ -323,6 +334,10 @@ class ErrorAnalysisWorkflow:
             self.config.security,
             LanguageConfig()
         )
+        self.class_schema_extractor = ClassSchemaExtractor(
+            self.config.security,
+            LanguageConfig(),
+        )
         
         self.editer_manager = EditorService(editer_config)
         self.error_collector = ErrorContextCollector(
@@ -341,13 +356,15 @@ class ErrorAnalysisWorkflow:
         graph.add_node("parse_error", self._parse_error_node)
         graph.add_node("parse_file", self._parse_file_node)
         graph.add_node("find_dependencies", self._find_dependencies_node)
+        graph.add_node("extract_class_schemas", self._extract_class_schemas_node)
         graph.add_node("analyze_impact", self._analyze_impact_node)
         
         # Add edges
         graph.set_entry_point("parse_error")
         graph.add_edge("parse_error", "parse_file")
         graph.add_edge("parse_file", "find_dependencies")
-        graph.add_edge("find_dependencies", "analyze_impact")
+        graph.add_edge("find_dependencies", "extract_class_schemas")
+        graph.add_edge("extract_class_schemas", "analyze_impact")
         graph.add_edge("analyze_impact", END)
         
         return graph
@@ -744,9 +761,88 @@ class ErrorAnalysisWorkflow:
                 state, node_name, str(e), node_context
             )
 
+    async def _extract_class_schemas_node(self, state: AnalysisState) -> AnalysisState:
+        """
+        Node 4: Build class schema index for affected files and dependents.
+        """
+        node_name = "extract_class_schemas"
+        node_context = self.metrics_collector.record_node_start(node_name, state)
+        retry_count = self._get_retry_count(state, node_name)
+
+        try:
+            if not self.class_schema_extractor:
+                raise ValueError("Class schema extractor not initialized")
+
+            file_paths: Set[str] = set()
+
+            for parsed_error in state.get("parsed_errors", []):
+                path = getattr(parsed_error, "file_path", None)
+                if path:
+                    file_paths.add(path)
+
+            for dependent in state.get("affected_dependents", []):
+                if getattr(dependent, "file_path", None):
+                    file_paths.add(dependent.file_path)
+                for dep_file in getattr(dependent, "dependent_files", []) or []:
+                    if dep_file:
+                        file_paths.add(dep_file)
+
+            if not file_paths:
+                state["class_definitions"] = []
+                state["warnings"].append("No files available for class schema extraction.")
+                metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
+                state["metrics"].node_metrics.append(metrics)
+                self._reset_retry_count(state, node_name)
+                return state
+
+            unique_defs: Dict[str, ClassDefinition] = {}
+
+            for file_path in sorted(file_paths):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        file_content = f.read()
+                except FileNotFoundError:
+                    state["warnings"].append(f"File not found for class extraction: {file_path}")
+                    continue
+                except Exception as read_error:
+                    state["warnings"].append(f"Failed to read {file_path}: {read_error}")
+                    continue
+
+                sanitized_content, redactions = self.security_manager.sanitize_content(file_content)
+                if redactions:
+                    state["sensitive_data_detected"] = True
+                    state["sanitized_content"].update(redactions)
+
+                try:
+                    definitions = self.class_schema_extractor.extract_class_definitions(
+                        sanitized_content, file_path
+                    )
+                except Exception as parse_error:
+                    state["warnings"].append(
+                        f"Class schema extraction failed for {file_path}: {parse_error}"
+                    )
+                    continue
+
+                for class_def in definitions:
+                    key = f"{class_def.file_path}:{class_def.name}"
+                    if key not in unique_defs:
+                        unique_defs[key] = class_def
+
+            state["class_definitions"] = list(unique_defs.values())
+
+            metrics = self.metrics_collector.record_node_end(node_context, state, True, retry_count)
+            state["metrics"].node_metrics.append(metrics)
+            self._reset_retry_count(state, node_name)
+            return state
+
+        except Exception as e:
+            return await self._handle_node_error(
+                state, node_name, str(e), node_context
+            )
+
     async def _analyze_impact_node(self, state: AnalysisState) -> AnalysisState:
         """
-        Node 4: Analyze impact using LLM with few-shot examples
+        Node 5: Analyze impact using LLM with few-shot examples
         """
         node_name = "analyze_impact"
         node_context = self.metrics_collector.record_node_start(node_name, state)
@@ -889,6 +985,34 @@ class ErrorAnalysisWorkflow:
                     "usage_contexts_count": dependent.usage_contexts_count
                 }
                 for dependent in state.get("affected_dependents", [])
+            ],
+            "class_definitions": [
+                {
+                    "name": class_def.name,
+                    "file_path": class_def.file_path,
+                    "parent_class": class_def.parent_class,
+                    "fields": [
+                        {
+                            "name": field.name,
+                            "data_type": field.data_type,
+                            "visibility": field.visibility,
+                        }
+                        for field in class_def.fields
+                    ],
+                    "methods": [
+                        {
+                            "name": method.name,
+                            "parameters": [
+                                {"name": param.name, "data_type": param.data_type}
+                                for param in method.parameters
+                            ],
+                            "return_type": method.return_type,
+                            "visibility": method.visibility,
+                        }
+                        for method in class_def.methods
+                    ],
+                }
+                for class_def in state.get("class_definitions", [])
             ],
             'workflow_context': {
                 'workflow_id': state['workflow_id'],
