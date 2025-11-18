@@ -1,3 +1,4 @@
+import os
 import re
 import asyncio
 from dataclasses import dataclass
@@ -5,6 +6,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import hashlib
 import time
+
+from indexer.zoekt_client import ZoektClient
 
 @dataclass
 class ErrorInfo:
@@ -30,6 +33,17 @@ class FunctionContext:
     parameters: List[str] = None
 
 @dataclass
+class DependencyInfo:
+    """
+    Docstring for DependencyInfo
+    
+    :var formats: Description
+    """
+    import_name: str
+    resolved_path: str
+    line_number: int
+
+@dataclass
 class UsageContext:
     """Context about function usage in other files"""
     file_path: str
@@ -38,6 +52,30 @@ class UsageContext:
     context_after: str
     usage_type: str  # 'call', 'import', 'reference'
     score: float
+
+
+@dataclass
+class Dependent:
+    """
+    Docstring for Dependent
+    
+    :var formats: Description
+    """
+    file_path: str
+    dependent_files: List[str]
+    import_dependencies: List[DependencyInfo]
+    usage_contexts: List[UsageContext]
+    @property
+    def import_dependencies_count(self) -> int:
+        return len(self.import_dependencies)
+    
+    @property
+    def dependent_files_count(self) -> int:
+        return len(self.dependent_files)
+
+    @property
+    def usage_contexts_count(self) -> int:
+        return len(self.usage_contexts)
 
 @dataclass
 class EnhancedContext:
@@ -54,7 +92,7 @@ class ErrorContextCollector:
     """Main orchestrator for collecting enhanced context around code errors"""
     
     def __init__(self, 
-                 zoekt_client,
+                 zoekt_client:ZoektClient,
                  function_analyzer,
                  context_summarizer,
                  cache_manager,
@@ -69,61 +107,95 @@ class ErrorContextCollector:
         self.max_files = max_files
         self.max_processing_time = max_processing_time
 
-    def parse_error_input(self, error_input: str) -> ErrorInfo:
+    async def parse_error_input(self, error_input: str) -> List[ErrorInfo]:
         """
         Parse various error input formats:
         - "input undefined error main.js 33:12"
         - "TypeError: Cannot read property 'value' of null at main.js:33:12"
         - "main.js:33:12 - error TS2304: Cannot find name 'input'"
         """
+        # Setup return
+        error_input = error_input.replace("\n", " ")
+        errors_list: List[ErrorInfo] = []
+
         # Pattern 1: "variable_name error_type error file_path line:column"
-        pattern1 = r"(\w+)\s+(\w+)\s+error\s+([^\s]+)\s+(\d+):(\d+)"
-        match = re.search(pattern1, error_input)
-        if match:
-            return ErrorInfo(
-                variable_or_symbol=match.group(1),
-                error_type=match.group(2),
-                file_path=match.group(3),
-                line_number=int(match.group(4)),
-                column_number=int(match.group(5))
-            )
+        # pattern1 = r"(\w+)\s+(\w+)\s+error\s+([^\s]+)\s+(\d+):(\d+)"
+        # match = re.search(pattern1, error_input)
+        # if match:
+        #     return ErrorInfo(
+        #         variable_or_symbol=match.group(1),
+        #         error_type=match.group(2),
+        #         file_path=match.group(3),
+        #         line_number=int(match.group(4)),
+        #         column_number=int(match.group(5))
+        #     )
         
         # Pattern 2: "file_path:line:column - error message"
-        pattern2 = r"([^\s:]+):(\d+):(\d+)\s*-\s*.*?(\w+)"
-        match = re.search(pattern2, error_input)
-        if match:
-            return ErrorInfo(
-                file_path=match.group(1),
-                line_number=int(match.group(2)),
-                column_number=int(match.group(3)),
-                error_type=match.group(4),
-                variable_or_symbol=""  # Will be extracted from context
-            )
+        # pattern2 = r"([^\s:]+):(\d+):(\d+)\s*-\s*.*?(\w+)"
+        # match = re.search(pattern2, error_input)
+        # if match:
+        #     return ErrorInfo(
+        #         file_path=match.group(1),
+        #         line_number=int(match.group(2)),
+        #         column_number=int(match.group(3)),
+        #         error_type=match.group(4),
+        #         variable_or_symbol=""  # Will be extracted from context
+        #     )
         
         # Pattern 3: "ErrorType: message at file_path:line:column"
-        pattern3 = r"(\w+Error):\s*.*?\s+at\s+([^\s:]+):(\d+):(\d+)"
-        match = re.search(pattern3, error_input)
-        if match:
-            return ErrorInfo(
-                error_type=match.group(1),
-                file_path=match.group(2),
-                line_number=int(match.group(3)),
-                column_number=int(match.group(4)),
-                variable_or_symbol=""  # Will be extracted from context
-            )
+        # pattern3 = r"(\w+Error):\s*.*?\s+at\s+([^\s:]+):(\d+):(\d+)"
+        # match = re.search(pattern3, error_input)
+        # if match:
+        #     return ErrorInfo(
+        #         error_type=match.group(1),
+        #         file_path=match.group(2),
+        #         line_number=int(match.group(3)),
+        #         column_number=int(match.group(4)),
+        #         variable_or_symbol=""  # Will be extracted from context
+        #     )
+        # Pattern4: Python
+        pattern4 = r'File "([^"]+)", line (\d+)[\s\S]*?(\w+Error):'
+        matches = re.finditer(pattern4, error_input)
+        if matches:
+            for match in matches:
+                file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+                error = ErrorInfo(
+                    file_path=file_path,
+                    line_number=int(match.group(2)),
+                    error_type=match.group(3),
+                    variable_or_symbol="",
+                    column_number=None
+                )
+                errors_list.append(error)
+
+        pattern5 = r"([^:\s]+):(\d+): \w+: (.*?)\s+.*?\^"
+        matches = re.finditer(pattern5, error_input)
+        if matches:
+            for match in matches:
+                file_path = "./codebase/" + await self._find_correct_file_path("codebase", match.group(1))
+                error = ErrorInfo(
+                    file_path=file_path, # type: ignore
+                    line_number=int(match.group(2)),
+                    error_type=match.group(3).strip(), # Đây là thông điệp lỗi
+                    variable_or_symbol="",
+                    column_number=None 
+                )
+                errors_list.append(error)
+            return errors_list
         
         # Fallback: try to extract basic info
         file_match = re.search(r"([^\s:]+\.[a-zA-Z]+)", error_input)
         line_match = re.search(r":(\d+)", error_input)
-        
+
         if file_match and line_match:
-            return ErrorInfo(
+            return [ErrorInfo(
                 file_path=file_match.group(1),
                 line_number=int(line_match.group(1)),
                 error_type="unknown",
                 variable_or_symbol=""
-            )
-        
+            )]
+
+        print(f"Unable to parse error input: {error_input}")
         raise ValueError(f"Unable to parse error input: {error_input}")
 
     def generate_cache_key(self, error_info: ErrorInfo, file_content_hash: str) -> str:
@@ -205,6 +277,48 @@ class ErrorContextCollector:
                 processing_time_ms=int((time.time() - start_time) * 1000),
                 cache_hit=False
             )
+
+    async def _find_correct_file_path(self, repo_name: str, path_error: str):
+        # This is a fast, sync string operation.
+        path_guess = self._normalize_path_for_zoekt(repo_name, path_error)
+        
+        # Try to find the file using the full guessed path.
+        results = await self.zoekt_client.search_by_filename(
+            filename=path_guess
+        )
+
+        if results and len(results) == 1:
+            return results[0]["FileName"]
+
+        # try a fallback search using only the bare filename.
+        print(f"Could not find '{path_guess}'. Trying fallback...")
+        
+        fallback_name = os.path.basename(path_guess)
+        
+        results_fallback = await self.zoekt_client.search_by_filename(
+            filename=fallback_name
+        )
+        if results_fallback and len(results_fallback) > 0:
+            return results_fallback[0]["FileName"]
+        
+        # Give up, return the best guess we had
+        return path_guess
+    
+    def _normalize_path_for_zoekt(self, repo_name: str, path_error: str) -> str:
+        """
+        Cleans the error path. NO I/O, NO 'await'. Just string processing.
+        """
+        # ... (Implementation from previous message) ...
+        base_repo_name = repo_name.split('/')[-1].split('\\')[-1]
+        clean_path = path_error.replace("\\", "/")
+        clean_path = re.sub(r":\d+.*$", "", clean_path).strip()
+
+        if base_repo_name in clean_path:
+            repo_index = clean_path.find(base_repo_name)
+            start_index = repo_index + len(base_repo_name)
+            return clean_path[start_index:].lstrip("/")
+        else:
+            return clean_path.lstrip("./")
 
     async def _get_file_content(self, file_path: str) -> str:
         """Get file content, handling both absolute and relative paths"""
@@ -304,3 +418,80 @@ class ErrorContextCollector:
             formatted += f"\n## Dependencies\n{context.dependency_info['imports']}\n"
         
         return formatted 
+    
+    def format_json_return(self):
+        return f"""
+STRICT OUTPUT FORMAT:
+- Return only the JSON value that conforms to the schema. Do not include any additional text, explanations, or wrappers.
+- The response must be a single, valid JSON object.
+
+Here is the output schema:
+
+{{
+  "$defs": {{
+    "FileFixDetail": {{
+      "properties": {{
+        "file_path": {{
+          "description": "The relative path to the file that needs to be fixed.",
+          "title": "File Path",
+          "type": "string"
+        }},
+        "line_numbers": {{
+          "description": "A list of line numbers in this file that need to be replaced.",
+          "items": {{"type": "integer"}},
+          "title": "Line Numbers",
+          "type": "array"
+        }},
+        "new_contents": {{
+          "description": "A corresponding list of new code lines. The line at line_numbers[i] must be replaced with new_contents[i].",
+          "items": {{"type": "string"}},
+          "title": "New Contents",
+          "type": "array"
+        }}
+      }},
+      "required": ["file_path", "line_numbers", "new_contents"],
+      "title": "FileFixDetail",
+      "type": "object"
+    }},
+    "CodeFixMetadata": {{
+      "properties": {{
+        "total_lines_analyzed": {{
+          "description": "The total number of lines analyzed.",
+          "title": "Total Lines Analyzed",
+          "type": "integer"
+        }},
+        "processing_time_ms": {{
+          "description": "The time in milliseconds it took the model to process the request.",
+          "title": "Processing Time Ms",
+          "type": "integer"
+        }},
+        "model_used": {{
+          "description": "The name of the language model used.",
+          "title": "Model Used",
+          "type": "string"
+        }}
+      }},
+      "required": ["total_lines_analyzed", "processing_time_ms", "model_used"],
+      "title": "CodeFixMetadata",
+      "type": "object"
+    }}
+  }},
+  "properties": {{
+    "file_fixes": {{
+      "description": "A list of files to fix. Each item contains the file path and the corresponding lists of lines and new content.",
+      "items": {{"$ref": "#/$defs/FileFixDetail"}},
+      "title": "File Fixes",
+      "type": "array"
+    }},
+    "explanation": {{
+      "description": "A high-level, human-readable summary from the AI explaining what was wrong and how it was fixed.",
+      "title": "Explanation",
+      "type": "string"
+    }},
+    "metadata": {{
+      "$ref": "#/$defs/CodeFixMetadata"
+    }}
+  }},
+  "required": ["file_fixes", "explanation", "metadata"]
+}}
+"""

@@ -8,7 +8,7 @@ from typing import TypedDict, Optional, List, Dict, Any
 from dataclasses import dataclass
 import time
 
-from ai.core.error_context_collector import ErrorInfo, FunctionContext, UsageContext
+from ai.core.error_context_collector import Dependent, ErrorInfo, FunctionContext, UsageContext
 
 @dataclass
 class DependencyInfo:
@@ -27,6 +27,92 @@ class ImpactAnalysis:
     breaking_changes: List[str]
     test_recommendations: List[str]
     confidence_score: float  # 0.0 to 1.0
+
+    def convert_llm_response_to_impact(llm_response: Dict[str, Any]): # type: ignore
+        """
+        Converts the LLM fix result (JSON) into 
+        an instance of the ImpactAnalysis class.
+        """
+        
+        # --- Extract and infer data ---
+        
+        # 1. Get confidence_score (direct mapping)
+        confidence = llm_response.get('confidence_score', 0.0)
+        
+        # 2. Get the affected file
+        try:
+            # Get the file path from the context
+            file_path = llm_response['context_used']['error_info']['file']
+            affected = [file_path]
+        except (KeyError, TypeError):
+            affected = []
+            
+        # 3. Create the fix suggestion (merge explanation and new_contents)
+        explanation = llm_response.get('explanation', 'No explanation provided.')
+        try:
+            # Get the new code content (assuming new_contents is a list)
+            fix_code = llm_response.get('new_contents', [''])[0].strip()
+            suggestion = f"{explanation} | Suggested fix: `{fix_code}`"
+        except (IndexError, TypeError):
+            suggestion = explanation
+            
+        suggestions = [suggestion]
+
+        # 4.Assign default values for fields not present in the llm_response
+        # We cannot know "risk_level" or "breaking_changes" 
+        # from the fix JSON, so we assign defaults.
+        
+        if confidence > 0.9:
+            risk = 'low'
+        elif confidence < 0.5:
+            risk = 'high'
+        else:  # Confidence is between 0.5 and 0.9 (inclusive)
+            risk = 'medium'
+        breaking = [] # Assume no breaking changes
+        tests = ['Recommend writing a unit test for the fixed line of code.'] # Default test recommendation
+
+        # --- Create and return the ImpactAnalysis object ---
+        return ImpactAnalysis(
+            risk_level=risk,
+            affected_files=affected,
+            fix_suggestions=suggestions,
+            breaking_changes=breaking,
+            test_recommendations=tests,
+            confidence_score=confidence
+        )
+
+@dataclass
+class ClassField:
+    """Schema information for a class field/attribute"""
+    name: str
+    data_type: str
+    visibility: str = "public"
+
+
+@dataclass
+class MethodParameter:
+    """Schema information for a method parameter"""
+    name: str
+    data_type: str
+
+
+@dataclass
+class ClassMethod:
+    """Schema information for a class method"""
+    name: str
+    parameters: List[MethodParameter]
+    return_type: str
+    visibility: str = "public"
+
+
+@dataclass
+class ClassDefinition:
+    """Schema definition for a class within the codebase"""
+    name: str
+    file_path: str
+    fields: List[ClassField]
+    methods: List[ClassMethod]
+    parent_class: Optional[str] = None
 
 @dataclass
 class NodeMetrics:
@@ -65,15 +151,16 @@ class AnalysisState(TypedDict):
     workflow_id: str
     
     # Parsed Error Information
-    parsed_error: Optional[ErrorInfo]
+    parsed_errors: List[ErrorInfo]
     
     # Function Analysis
-    target_function: Optional[FunctionContext]
-    
+    affected_functions: List[FunctionContext]
+
     # Dependency Analysis
-    dependent_files: List[str]  # Files that import/use the target file
-    import_dependencies: List[DependencyInfo]  # Detailed import information
-    usage_contexts: List[UsageContext]  # How the function is used
+    affected_dependents: List[Dependent]
+
+    # Class Structure Index
+    class_definitions: List[ClassDefinition]
     
     # Impact Analysis
     impact_analysis: Optional[ImpactAnalysis]
@@ -118,15 +205,14 @@ def create_initial_state(raw_error: str, workflow_id: str, config: Dict[str, Any
         workflow_id=workflow_id,
         
         # Parsed Error Information
-        parsed_error=None,
+        parsed_errors=[],
         
         # Function Analysis
-        target_function=None,
+        affected_functions=[],
         
         # Dependency Analysis
-        dependent_files=[],
-        import_dependencies=[],
-        usage_contexts=[],
+        affected_dependents=[],
+        class_definitions=[],
         
         # Impact Analysis
         impact_analysis=None,
@@ -175,42 +261,58 @@ def state_to_json_output(state: AnalysisState) -> Dict[str, Any]:
         "timestamp": time.time(),
         "error_info": {
             "raw_error": state["raw_error"],
-            "parsed_error": {
-                "type": state["parsed_error"].error_type if state["parsed_error"] else None,
-                "file": state["parsed_error"].file_path if state["parsed_error"] else None,
-                "line": state["parsed_error"].line_number if state["parsed_error"] else None,
-                "column": state["parsed_error"].column_number if state["parsed_error"] else None,
-                "variable": state["parsed_error"].variable_or_symbol if state["parsed_error"] else None
-            } if state["parsed_error"] else None
-        },
-        "function_context": {
-            "name": state["target_function"].name if state["target_function"] else None,
-            "file": state["target_function"].file_path if state["target_function"] else None,
-            "language": state["target_function"].language if state["target_function"] else None,
-            "signature": state["target_function"].signature if state["target_function"] else None,
-            "parameters": state["target_function"].parameters if state["target_function"] else None,
-            "documentation": state["target_function"].documentation if state["target_function"] else None
-        } if state["target_function"] else None,
-        "dependencies": {
-            "dependent_files": state["dependent_files"],
-            "import_dependencies": [
+            "parsed_errors": [
                 {
-                    "file": dep.file_path,
-                    "type": dep.import_type,
-                    "line": dep.line_number,
-                    "statement": dep.import_statement
-                } for dep in state["import_dependencies"]
-            ],
-            "usage_contexts": len(state["usage_contexts"]),
-            "usage_summary": [
-                {
-                    "file": usage.file_path,
-                    "line": usage.line_number,
-                    "type": usage.usage_type,
-                    "score": usage.score
-                } for usage in state["usage_contexts"][:5]  # Top 5 usages
+                    "type": error.error_type,
+                    "file": error.file_path,
+                    "line": error.line_number,
+                    "column": error.column_number,
+                    "variable": error.variable_or_symbol
+                }
+                for error in state["parsed_errors"]
             ]
         },
+        "affected_functions": [
+            {
+                "signature": func.signature,
+                "file": func.file_path,
+                "language": func.language,
+                "parameters": func.parameters,
+                "implementation": func.implementation,
+                "start": func.start_line,
+                "end": func.end_line,
+            }
+            for func in state["affected_functions"]
+        ],
+        "dependencies": [
+            {
+                "file_path": dependent.file_path,
+                "dependent_files": dependent.dependent_files,
+                "dependent_files_count": dependent.dependent_files_count,
+                
+                "import_dependencies": [
+                    {
+                        "import_name": dep.import_name,
+                        "resolved_path": dep.resolved_path,
+                        "line_number": dep.line_number
+                    } for dep in dependent.import_dependencies
+                ],
+                "import_dependencies_count": dependent.import_dependencies_count,
+                
+                "usage_contexts": [
+                    {
+                        "file_path": usage.file_path,
+                        "line_number": usage.line_number,
+                        "context_before": usage.context_before,
+                        "context_after": usage.context_after,
+                        "usage_type": usage.usage_type,
+                        "score": usage.score
+                    } for usage in dependent.usage_contexts[:5] 
+                ],
+                "usage_contexts_count": dependent.usage_contexts_count
+            }
+            for dependent in state.get("affected_dependents", [])
+        ],
         "impact_analysis": {
             "risk_level": state["impact_analysis"].risk_level if state["impact_analysis"] else "unknown",
             "affected_files": state["impact_analysis"].affected_files if state["impact_analysis"] else [],
@@ -219,6 +321,34 @@ def state_to_json_output(state: AnalysisState) -> Dict[str, Any]:
             "test_recommendations": state["impact_analysis"].test_recommendations if state["impact_analysis"] else [],
             "confidence_score": state["impact_analysis"].confidence_score if state["impact_analysis"] else 0.0
         },
+        "class_definitions": [
+            {
+                "name": class_def.name,
+                "file_path": class_def.file_path,
+                "parent_class": class_def.parent_class,
+                "fields": [
+                    {
+                        "name": field.name,
+                        "data_type": field.data_type,
+                        "visibility": field.visibility
+                    }
+                    for field in class_def.fields
+                ],
+                "methods": [
+                    {
+                        "name": method.name,
+                        "parameters": [
+                            {"name": param.name, "data_type": param.data_type}
+                            for param in method.parameters
+                        ],
+                        "return_type": method.return_type,
+                        "visibility": method.visibility
+                    }
+                    for method in class_def.methods
+                ]
+            }
+            for class_def in state.get("class_definitions", [])
+        ],
         "metrics": {
             "total_execution_time_ms": state["metrics"].total_execution_time_ms,
             "total_memory_usage_mb": state["metrics"].total_memory_usage_mb,

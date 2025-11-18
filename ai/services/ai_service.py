@@ -5,7 +5,7 @@ import redis.asyncio as redis
 
 from ai.core.context_store import ContextStore
 from ai.core.repo_processor import RepoProcessor
-from ai.core.error_context_collector import ErrorContextCollector
+from ai.core.error_context_collector import ErrorContextCollector, ErrorInfo
 from ai.core.function_analyzer import FunctionAnalyzer
 from ai.core.zoekt_search_manager import ZoektSearchManager
 from ai.core.context_summarizer import ContextSummarizer
@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain.schema import Document
+from langchain_core.documents import Document
 import asyncio
 
 from ai.prompts.code_analysis import CodeFix, CODE_FIX_PROMPT_TEMPLATE
@@ -151,7 +151,7 @@ Your task is to provide a comprehensive fix based on this rich context. Consider
 Provide a detailed analysis with specific fixes and high confidence based on the enhanced context.
 """
 
-    async def debug_and_fix_with_context(self, error_input: str) -> Dict[str, Any]:
+    async def debug_and_fix_with_context(self, error_input: str, error_info: List[ErrorInfo]) -> Dict[str, Any]:
         """
         Enhanced debug and fix method that uses comprehensive context analysis
         
@@ -198,30 +198,14 @@ Provide a detailed analysis with specific fixes and high confidence based on the
         except Exception as e:
             print(f"Enhanced context analysis failed: {e}")
             # Fallback to original method
-            return await self._fallback_debug_and_fix(error_input)
+            return await self._fallback_debug_and_fix(error_input, error_info)
 
-    async def _fallback_debug_and_fix(self, error_input: str) -> Dict[str, Any]:
+    async def _fallback_debug_and_fix(self, error_input: str, error_info: List[ErrorInfo]) -> Dict[str, Any]:
         """Fallback to original debug method if enhanced analysis fails"""
         
-        try:
-            # Parse error to extract file information
-            error_info = self.error_context_collector.parse_error_input(error_input)
-            
-            # Read the file content
-            file_content = await self.error_context_collector._get_file_content(error_info.file_path)
-            
-            # Add line numbers for context
-            numbered_content = self.repo_processor.add_line_numbers_to_content(file_content, 1)
-            
-            # Use original chain
-            result = await self.chain.ainvoke({"code": numbered_content})
-            
-            # Add fallback indicator
-            result["context_metadata"] = {
-                "fallback_used": True,
-                "error_file": error_info.file_path,
-                "error_line": error_info.line_number
-            }
+        try:            
+            # Read the file content            
+            result = await self.chain.ainvoke(error_input + self.error_context_collector.format_json_return())
             
             return result
             

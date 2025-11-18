@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -126,8 +126,10 @@ async def health():
 async def submit_fix_request(
     repo: str,
     request: FixRequestModel,
+    trace_error: str,
     queue_mgr: QueueManager = Depends(get_queue_manager)
 ) -> FixResponseModel:
+    if (request): request.trace_error = trace_error
     """
     Submit a code fix request
     

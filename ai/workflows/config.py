@@ -8,6 +8,13 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+primary_model_name = os.getenv("AI_NAME")
+ai_model_name = os.getenv("AI_MODEL")
+ai_endpoint = os.getenv("END_POINT")
+ai_api_key = os.getenv("AI_API_KEY")
 
 @dataclass
 class SecurityConfig:
@@ -67,9 +74,17 @@ class WorkflowConfig:
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     language: LanguageConfig = field(default_factory=LanguageConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    allow_mock_langgraph: bool = True
     
     # LLM Configuration
-    primary_model: str = "google_gemini"
+    tenant_id: str = "tenant1"
+    redis_url: str = "redis://localhost:6379"
+    # Model Config
+    primary_model: str = primary_model_name # type: ignore
+    ai_model: str = ai_model_name # type: ignore
+    ai_endpoint: str = ai_endpoint # type: ignore
+    ai_api_key: str = ai_api_key # type: ignore
+
     model_temperature: float = 0.1  # Low temperature for consistent results
     max_tokens: int = 2048
     
@@ -156,6 +171,7 @@ class WorkflowConfig:
             'max_retries_per_node': self.max_retries_per_node,
             'enable_llm_fallback': self.enable_llm_fallback,
             'enable_simple_fallback': self.enable_simple_fallback,
+            'allow_mock_langgraph': self.allow_mock_langgraph,
             'enable_few_shot': self.enable_few_shot,
             'few_shot_examples_path': self.few_shot_examples_path
         }

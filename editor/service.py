@@ -34,7 +34,7 @@ class EditorConfig:
     lock_timeout_seconds: int = 30
     operation_timeout_seconds: int = 60
     allowed_extensions: List[str] = field(default_factory=lambda: [
-        '.py', '.js', '.ts', '.json', '.yaml', '.yml', '.txt', '.md'
+        '.py', '.java', '.js', '.ts', '.json', '.yaml', '.yml', '.txt', '.md'
     ])
     max_file_size_mb: int = 50
     validate_syntax: bool = True
@@ -389,7 +389,7 @@ class EditorService:
         """Clean up old backup files"""
         await self.backup_manager.cleanup_old_backups()
 
-    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: list, options: Optional[EditOptions] = None) -> EditResult:
+    async def edit_lines(self, file_path: str, line_numbers: list, new_contents: str|list, options: Optional[EditOptions] = None) -> EditResult:
         """Convenience method for editing multiple lines"""
         request = EditRequest(
             file_path=file_path,

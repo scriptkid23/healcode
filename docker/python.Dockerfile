@@ -1,19 +1,20 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
 # Install Poetry
 RUN pip install poetry==1.4.2
 
-# Copy only dependency definition files first for better layer caching
+# Copy dependency files first (to leverage cache)
 COPY pyproject.toml poetry.lock* ./
 
-# Configure poetry to not use a virtual environment
+# Copy source code (so Poetry can install the local package /app/ai)
+COPY . .
+
+# Configure Poetry to install directly into the container (no venv) + install deps
 RUN poetry config virtualenvs.create false \
     && poetry install --no-dev --no-interaction --no-ansi
 
-# Copy the source code
-COPY . .
-
-# Set the default command to nothing but use CMD in docker-compose
-CMD ["bash"] 
+# Default command
+CMD ["bash"]
