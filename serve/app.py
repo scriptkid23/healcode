@@ -86,6 +86,12 @@ app = create_app()
 
 
 # Pydantic models for API
+
+class CredentialRequest(BaseModel):
+    id: str
+    name: str
+    token: str
+
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
     repo_name: str = Field(..., description="Repository name")
@@ -128,17 +134,15 @@ async def health():
 
 @app.post("/start", tags=["Credential"])
 async def credential (
-    id: str,
-    name: str,
-    token: str
+    body: CredentialRequest
 ):
     try:
 
-        user_uuid = get_or_create_user(id, name)
+        user_uuid = get_or_create_user(body.id, body.name)
         data = {
-            "name": name,
+            "name": body.name,
             "type": "token",
-            "token": token,
+            "token": body.token,
             "username": str(user_uuid["id"]), # type: ignore
             "password": "string"
         }
