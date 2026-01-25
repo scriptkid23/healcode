@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 from .models import FixRequest, FixResponse, TaskStatus, QueueStats, TaskInfo
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
+from .database import fetchdata, get_or_create_user
+from .call_api import base_api, apis
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -112,6 +115,7 @@ def get_queue_manager() -> QueueManager:
 
 @app.get("/", tags=["Health"])
 async def root():
+    fetchdata()
     """Root endpoint"""
     return {"message": "Code Fix Service API", "version": "1.0.0"}
 
@@ -120,6 +124,38 @@ async def root():
 async def health():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
+
+
+@app.post("/start", tags=["Credential"])
+async def credential (
+    id: str,
+    name: str,
+    token: str
+):
+    try:
+
+        user_uuid = get_or_create_user(id, name)
+        data = {
+            "name": name,
+            "type": "token",
+            "token": token,
+            "username": str(user_uuid["id"]), # type: ignore
+            "password": "string"
+        }
+        base_api(apis["gitplugin"]["credentials"], body=data)
+        return {"status": "success", "user_id": user_uuid}
+    except Exception as e:
+        return {"error": "API bên thứ ba lỗi", "details": str(e)}
+
+@app.post("/repo", tags=["Credential"])
+async def repo (
+    url: str
+):
+    pass
+
+@app.get("/status", tags=["Credential"])
+async def status():
+    pass
 
 
 @app.post("/api/fix/{repo}", response_model=FixResponseModel, tags=["Fix"])

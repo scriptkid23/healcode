@@ -1,0 +1,19 @@
+Using version ^0.28.1 for httpx
+Using version ^2.27.2 for supabase
+
+Updating dependencies
+Resolving dependencies...
+
+Package operations: 0 installs, 9 updates, 0 removals
+
+  - Updating grpcio (1.73.1 -> 1.76.0)
+  - Updating langchain-core (0.3.68 -> 1.0.3)
+  - Updating anthropic (0.57.1 -> 0.72.0)
+  - Updating google-ai-generativelanguage (0.6.18 -> 0.9.0)
+  - Updating openai (1.93.0 -> 2.7.1)
+  - Updating langchain (0.3.26 -> 1.0.4)
+  - Updating langchain-anthropic (0.3.17 -> 1.0.1)
+  - Updating langchain-google-genai (2.1.6 -> 3.0.1)
+  - Updating langchain-openai (0.3.27 -> 1.0.2)
+
+Writing lock file
