@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 from .models import FixRequest, FixResponse, TaskStatus, QueueStats, TaskInfo
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
+from .database import fetchdata, get_or_create_user
+from .call_api import base_api, apis
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -112,6 +115,7 @@ def get_queue_manager() -> QueueManager:
 
 @app.get("/", tags=["Health"])
 async def root():
+    fetchdata()
     """Root endpoint"""
     return {"message": "Code Fix Service API", "version": "1.0.0"}
 
@@ -122,12 +126,46 @@ async def health():
     return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
 
 
+@app.post("/start", tags=["Credential"])
+async def credential (
+    id: str,
+    name: str,
+    token: str
+):
+    try:
+
+        user_uuid = get_or_create_user(id, name)
+        data = {
+            "name": name,
+            "type": "token",
+            "token": token,
+            "username": str(user_uuid["id"]), # type: ignore
+            "password": "string"
+        }
+        base_api(apis["gitplugin"]["credentials"], body=data)
+        return {"status": "success", "user_id": user_uuid}
+    except Exception as e:
+        return {"error": "API bên thứ ba lỗi", "details": str(e)}
+
+@app.post("/repo", tags=["Credential"])
+async def repo (
+    url: str
+):
+    pass
+
+@app.get("/status", tags=["Credential"])
+async def status():
+    pass
+
+
 @app.post("/api/fix/{repo}", response_model=FixResponseModel, tags=["Fix"])
 async def submit_fix_request(
     repo: str,
     request: FixRequestModel,
+    trace_error: str,
     queue_mgr: QueueManager = Depends(get_queue_manager)
 ) -> FixResponseModel:
+    if (request): request.trace_error = trace_error
     """
     Submit a code fix request
     

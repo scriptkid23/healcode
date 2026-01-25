@@ -1,0 +1,22 @@
+Using version ^0.28.1 for httpx
+Using version ^2.27.2 for supabase
+
+Updating dependencies
+Resolving dependencies...
+
+Package operations: 3 installs, 9 updates, 0 removals
+
+  - Downgrading grpcio (1.76.0 -> 1.73.1)
+  - Installing greenlet (3.2.3)
+  - Downgrading langchain-core (1.0.3 -> 0.3.68)
+  - Downgrading anthropic (0.72.0 -> 0.57.1)
+  - Downgrading google-ai-generativelanguage (0.9.0 -> 0.6.18)
+  - Installing langchain-text-splitters (0.3.8)
+  - Downgrading openai (2.7.1 -> 1.93.0)
+  - Installing sqlalchemy (2.0.41)
+  - Downgrading langchain (1.0.4 -> 0.3.26)
+  - Downgrading langchain-anthropic (1.0.1 -> 0.3.17)
+  - Downgrading langchain-google-genai (3.0.1 -> 2.1.6)
+  - Downgrading langchain-openai (1.0.2 -> 0.3.27)
+
+Writing lock file
