@@ -5,7 +5,8 @@ FastAPI application for code fix service
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
-
+import os
+from git import Repo, GitCommandError
 from fastapi import FastAPI, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -26,6 +27,12 @@ logger = logging.getLogger(__name__)
 queue_manager: Optional[QueueManager] = None
 task_processor: Optional[TaskProcessor] = None
 
+# Define where you want to store the repos locally
+LOCAL_STORAGE_PATH = "./cloned_repos"
+
+class RepoRequest(BaseModel):
+    url: str
+    branch: Optional[str] = "main"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -151,15 +158,135 @@ async def credential (
     except Exception as e:
         return {"error": "API bên thứ ba lỗi", "details": str(e)}
 
+
 @app.post("/repo", tags=["Credential"])
-async def repo (
-    url: str
-):
-    pass
+async def repo(request: RepoRequest):
+    """
+    Clones a repository if it doesn't exist, or pulls the latest changes if it does.
+    """
+    try:
+        # Extract repo name from URL (e.g., https://github.com/user/my-repo.git -> my-repo)
+        repo_name = request.url.split("/")[-1].replace(".git", "")
+        repo_path = os.path.join(LOCAL_STORAGE_PATH, repo_name)
+
+        if not os.path.exists(LOCAL_STORAGE_PATH):
+            os.makedirs(LOCAL_STORAGE_PATH)
+
+        if os.path.exists(repo_path):
+            # If repo exists, perform a pull
+            logger.info(f"Repository {repo_name} exists. Pulling latest changes...")
+            repo_obj = Repo(repo_path)
+            origin = repo_obj.remotes.origin
+            origin.pull()
+            message = f"Repository {repo_name} updated successfully."
+        else:
+            # If repo doesn't exist, clone it
+            logger.info(f"Cloning repository {repo_name} from {request.url}...")
+            Repo.clone_from(request.url, repo_path, branch=request.branch)
+            message = f"Repository {repo_name} cloned successfully."
+
+        return {
+            "status": "success",
+            "message": message,
+            "local_path": repo_path
+        }
+
+    except GitCommandError as e:
+        logger.error(f"Git error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Git operation failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"General error in /repo: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/status", tags=["Credential"])
-async def status():
-    pass
+async def status(queue_mgr: QueueManager = Depends(get_queue_manager)):
+    """
+    Returns the status of repositories currently held in local storage (has bug, fixing, update).
+    """
+    # 1. Check if storage directory exists
+    if not os.path.exists(LOCAL_STORAGE_PATH):
+        return {"repos": [], "storage_root": None}
+
+    # 2. Get list of physical folders (repositories)
+    repo_dirs = [d for d in os.listdir(LOCAL_STORAGE_PATH) 
+                 if os.path.isdir(os.path.join(LOCAL_STORAGE_PATH, d))]
+    
+    # 3. Get all tasks to cross-reference status
+    all_tasks = queue_mgr.get_all_tasks()
+    
+    # Helper to find the latest status for a specific repo
+    def get_repo_status(repo_name):
+        # Filter tasks for this repo
+        repo_tasks = [t for t in all_tasks if t.repo_name == repo_name]
+        
+        if not repo_tasks:
+            return "idle" # No tasks ever run for this repo
+            
+        # Get the most recent task
+        latest_task = sorted(repo_tasks, key=lambda x: x.created_at, reverse=True)[0]
+        
+        # Map TaskStatus to your requested terms
+        if latest_task.status.value == "processing":
+            return "fixing"
+        elif latest_task.status.value == "pending":
+            return "has bug" # It is in queue waiting to be fixed
+        elif latest_task.status.value == "completed":
+            return "update" # Fix completed, repo is updated
+        elif latest_task.status.value == "failed":
+            return "has bug" # Fix failed, likely still has bug
+        else:
+            return latest_task.status.value
+
+    # 4. Build the result list
+    results = []
+    for repo in repo_dirs:
+        results.append({
+            "name": repo,
+            "status": get_repo_status(repo),
+            "path": os.path.abspath(os.path.join(LOCAL_STORAGE_PATH, repo))
+        })
+
+    return {
+        "count": len(results),
+        "repos": results,
+        "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
+    }
+
+@app.post("/fix", response_model=FixResponseModel, tags=["Fix"])
+async def submit_fix_request(
+    request: FixRequestModel,
+    queue_mgr: QueueManager = Depends(get_queue_manager)
+) -> FixResponseModel:
+    """
+    Gửi yêu cầu Heal Code.
+    Input: FixRequestModel(repo_name, trace_error, priority, metadata)
+    """
+    try:
+        fix_request = FixRequest(
+            repo_name=request.repo_name,
+            trace_error=request.trace_error,
+            priority=request.priority,
+            metadata=request.metadata or {}
+        )
+        
+        response = await queue_mgr.submit_task(fix_request)
+        
+        return FixResponseModel(
+            request_id=response.request_id,
+            status=response.status.value,
+            message=response.message,
+            result=response.result,
+            error=response.error,
+            started_at=response.started_at.isoformat() if response.started_at else None,
+            completed_at=response.completed_at.isoformat() if response.completed_at else None,
+            execution_time_ms=response.execution_time_ms
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error submitting fix request: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/fix/{repo}", response_model=FixResponseModel, tags=["Fix"])
