@@ -2,6 +2,7 @@
 FastAPI application for code fix service
 """
 
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 from .models import FixRequest, FixResponse, TaskStatus, QueueStats, TaskInfo
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
-from .database import fetchdata, get_or_create_user
+from .database import create_repositorie, fetchdata, get_or_create_user
 from .call_api import base_api, apis
 import uuid
 
@@ -31,6 +32,7 @@ task_processor: Optional[TaskProcessor] = None
 LOCAL_STORAGE_PATH = "./cloned_repos"
 
 class RepoRequest(BaseModel):
+    uuid: str
     url: str
     branch: Optional[str] = "main"
 
@@ -147,57 +149,78 @@ async def credential (
 
         user_uuid = get_or_create_user(body.id, body.name)
         data = {
-            "name": body.name,
+            "name": str(user_uuid["id"]), # type: ignore
             "type": "token",
             "token": body.token,
-            "username": str(user_uuid["id"]), # type: ignore
+            "username": body.name, # type: ignore
             "password": "string"
         }
-        base_api(apis["gitplugin"]["credentials"], body=data)
+        base_api(apis["gitplugin"]["create"]["credentials"], body=data)
         return {"status": "success", "user_id": user_uuid}
     except Exception as e:
         return {"error": "API bên thứ ba lỗi", "details": str(e)}
 
 
-@app.post("/repo", tags=["Credential"])
+@app.post("/repo", tags=["Git"])
 async def repo(request: RepoRequest):
     """
-    Clones a repository if it doesn't exist, or pulls the latest changes if it does.
+    Logic:
+    1. Kiểm tra trạng thái qua /git/status.
+    2. Nếu đã tồn tại: Pull code mới nhất.
+    3. Nếu chưa tồn tại: Setup (Clone) repository.
+    4. Chuyển sang branch (cây) yêu cầu. Nếu branch không tồn tại, báo lỗi.
     """
     try:
-        # Extract repo name from URL (e.g., https://github.com/user/my-repo.git -> my-repo)
-        repo_name = request.url.split("/")[-1].replace(".git", "")
-        repo_path = os.path.join(LOCAL_STORAGE_PATH, repo_name)
+        repo_hash = hashlib.md5(request.url.encode()).hexdigest()
+        workspace_path = f"codebase/{request.uuid}/{repo_hash}"
+        
+        try:
+            base_api(
+                apis["gitplugin"]["git"]["status"], 
+                params={"workspace_path": workspace_path}
+            )
 
-        if not os.path.exists(LOCAL_STORAGE_PATH):
-            os.makedirs(LOCAL_STORAGE_PATH)
+            logger.info(f"Repository exists at {workspace_path}. Pulling changes...")
+            base_api(
+                apis["gitplugin"]["git"]["pull"], 
+                params={"workspace_path": workspace_path}
+            )
+        
+        except:
+            logger.info(f"Repository not found. Setting up new repo from {request.url}...")
+            setup_data = {
+                "repo_url": request.url,
+                "credential_name": request.uuid,
+                "workspace_path": workspace_path
+            }
+            base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
+            create_repositorie(request.uuid, request.url, workspace_path)
 
-        if os.path.exists(repo_path):
-            # If repo exists, perform a pull
-            logger.info(f"Repository {repo_name} exists. Pulling latest changes...")
-            repo_obj = Repo(repo_path)
-            origin = repo_obj.remotes.origin
-            origin.pull()
-            message = f"Repository {repo_name} updated successfully."
-        else:
-            # If repo doesn't exist, clone it
-            logger.info(f"Cloning repository {repo_name} from {request.url}...")
-            Repo.clone_from(request.url, repo_path, branch=request.branch)
-            message = f"Repository {repo_name} cloned successfully."
+        if request.branch:
+            try:
+                switch_data = {
+                    "workspace_path": workspace_path,
+                    "branch_name": request.branch
+                }
+                base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
+                
+            except Exception:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Cây (Branch) '{request.branch}' không tồn tại hoặc không thể truy cập."
+                )
 
         return {
             "status": "success",
-            "message": message,
-            "local_path": repo_path
+            "message": f"Đã đồng bộ thành công repository và chuyển sang nhánh {request.branch or 'mặc định'}.",
+            "local_path": workspace_path
         }
 
-    except GitCommandError as e:
-        logger.error(f"Git error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Git operation failed: {str(e)}")
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        logger.error(f"General error in /repo: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+        logger.error(f"Lỗi thực hiện luồng repo: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
 @app.get("/status", tags=["Credential"])
 async def status(queue_mgr: QueueManager = Depends(get_queue_manager)):
     """
