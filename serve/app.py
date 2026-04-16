@@ -2,10 +2,12 @@
 FastAPI application for code fix service
 """
 
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
-
+import os
+from git import Repo, GitCommandError
 from fastapi import FastAPI, Form, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +16,9 @@ from pydantic import BaseModel, Field
 from .models import FixRequest, FixResponse, TaskStatus, QueueStats, TaskInfo
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
+from .database import create_repositorie, fetchdata, get_or_create_user
+from .call_api import base_api, apis
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +28,13 @@ logger = logging.getLogger(__name__)
 queue_manager: Optional[QueueManager] = None
 task_processor: Optional[TaskProcessor] = None
 
+# Define where you want to store the repos locally
+LOCAL_STORAGE_PATH = "./cloned_repos"
+
+class RepoRequest(BaseModel):
+    uuid: str
+    url: str
+    branch: Optional[str] = "main"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -83,6 +95,12 @@ app = create_app()
 
 
 # Pydantic models for API
+
+class CredentialRequest(BaseModel):
+    id: str
+    name: str
+    token: str
+
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
     repo_name: str = Field(..., description="Repository name")
@@ -112,6 +130,7 @@ def get_queue_manager() -> QueueManager:
 
 @app.get("/", tags=["Health"])
 async def root():
+    fetchdata()
     """Root endpoint"""
     return {"message": "Code Fix Service API", "version": "1.0.0"}
 
@@ -120,6 +139,177 @@ async def root():
 async def health():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
+
+
+@app.post("/start", tags=["Credential"])
+async def credential (
+    body: CredentialRequest
+):
+    try:
+
+        user_uuid = get_or_create_user(body.id, body.name)
+        data = {
+            "name": str(user_uuid["id"]), # type: ignore
+            "type": "token",
+            "token": body.token,
+            "username": body.name, # type: ignore
+            "password": "string"
+        }
+        base_api(apis["gitplugin"]["create"]["credentials"], body=data)
+        return {"status": "success", "user_id": user_uuid}
+    except Exception as e:
+        return {"error": "API bên thứ ba lỗi", "details": str(e)}
+
+
+@app.post("/repo", tags=["Git"])
+async def repo(request: RepoRequest):
+    """
+    Logic:
+    1. Kiểm tra trạng thái qua /git/status.
+    2. Nếu đã tồn tại: Pull code mới nhất.
+    3. Nếu chưa tồn tại: Setup (Clone) repository.
+    4. Chuyển sang branch (cây) yêu cầu. Nếu branch không tồn tại, báo lỗi.
+    """
+    try:
+        repo_hash = hashlib.md5(request.url.encode()).hexdigest()
+        workspace_path = f"codebase/{request.uuid}/{repo_hash}"
+        
+        try:
+            base_api(
+                apis["gitplugin"]["git"]["status"], 
+                params={"workspace_path": workspace_path}
+            )
+
+            logger.info(f"Repository exists at {workspace_path}. Pulling changes...")
+            base_api(
+                apis["gitplugin"]["git"]["pull"], 
+                params={"workspace_path": workspace_path}
+            )
+        
+        except:
+            logger.info(f"Repository not found. Setting up new repo from {request.url}...")
+            setup_data = {
+                "repo_url": request.url,
+                "credential_name": request.uuid,
+                "workspace_path": workspace_path
+            }
+            base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
+            create_repositorie(request.uuid, request.url, workspace_path)
+
+        if request.branch:
+            try:
+                switch_data = {
+                    "workspace_path": workspace_path,
+                    "branch_name": request.branch
+                }
+                base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
+                
+            except Exception:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Cây (Branch) '{request.branch}' không tồn tại hoặc không thể truy cập."
+                )
+
+        return {
+            "status": "success",
+            "message": f"Đã đồng bộ thành công repository và chuyển sang nhánh {request.branch or 'mặc định'}.",
+            "local_path": workspace_path
+        }
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Lỗi thực hiện luồng repo: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
+@app.get("/status", tags=["Credential"])
+async def status(queue_mgr: QueueManager = Depends(get_queue_manager)):
+    """
+    Returns the status of repositories currently held in local storage (has bug, fixing, update).
+    """
+    # 1. Check if storage directory exists
+    if not os.path.exists(LOCAL_STORAGE_PATH):
+        return {"repos": [], "storage_root": None}
+
+    # 2. Get list of physical folders (repositories)
+    repo_dirs = [d for d in os.listdir(LOCAL_STORAGE_PATH) 
+                 if os.path.isdir(os.path.join(LOCAL_STORAGE_PATH, d))]
+    
+    # 3. Get all tasks to cross-reference status
+    all_tasks = queue_mgr.get_all_tasks()
+    
+    # Helper to find the latest status for a specific repo
+    def get_repo_status(repo_name):
+        # Filter tasks for this repo
+        repo_tasks = [t for t in all_tasks if t.repo_name == repo_name]
+        
+        if not repo_tasks:
+            return "idle" # No tasks ever run for this repo
+            
+        # Get the most recent task
+        latest_task = sorted(repo_tasks, key=lambda x: x.created_at, reverse=True)[0]
+        
+        # Map TaskStatus to your requested terms
+        if latest_task.status.value == "processing":
+            return "fixing"
+        elif latest_task.status.value == "pending":
+            return "has bug" # It is in queue waiting to be fixed
+        elif latest_task.status.value == "completed":
+            return "update" # Fix completed, repo is updated
+        elif latest_task.status.value == "failed":
+            return "has bug" # Fix failed, likely still has bug
+        else:
+            return latest_task.status.value
+
+    # 4. Build the result list
+    results = []
+    for repo in repo_dirs:
+        results.append({
+            "name": repo,
+            "status": get_repo_status(repo),
+            "path": os.path.abspath(os.path.join(LOCAL_STORAGE_PATH, repo))
+        })
+
+    return {
+        "count": len(results),
+        "repos": results,
+        "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
+    }
+
+@app.post("/fix", response_model=FixResponseModel, tags=["Fix"])
+async def submit_fix_request(
+    request: FixRequestModel,
+    queue_mgr: QueueManager = Depends(get_queue_manager)
+) -> FixResponseModel:
+    """
+    Gửi yêu cầu Heal Code.
+    Input: FixRequestModel(repo_name, trace_error, priority, metadata)
+    """
+    try:
+        fix_request = FixRequest(
+            repo_name=request.repo_name,
+            trace_error=request.trace_error,
+            priority=request.priority,
+            metadata=request.metadata or {}
+        )
+        
+        response = await queue_mgr.submit_task(fix_request)
+        
+        return FixResponseModel(
+            request_id=response.request_id,
+            status=response.status.value,
+            message=response.message,
+            result=response.result,
+            error=response.error,
+            started_at=response.started_at.isoformat() if response.started_at else None,
+            completed_at=response.completed_at.isoformat() if response.completed_at else None,
+            execution_time_ms=response.execution_time_ms
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error submitting fix request: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/fix/{repo}", response_model=FixResponseModel, tags=["Fix"])
