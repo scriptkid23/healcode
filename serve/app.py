@@ -16,9 +16,39 @@ from pydantic import BaseModel, Field
 from .models import FixRequest, FixResponse, TaskStatus, QueueStats, TaskInfo
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
-from .database import create_repositorie, fetchdata, get_or_create_user
+from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user
 from .call_api import base_api, apis
 import uuid
+
+# Thêm các import cần thiết
+import jwt
+from datetime import datetime, timedelta
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+# Cấu hình JWT
+SECRET_KEY = os.getenv("JWT_SECRET", "")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 518400
+
+security = HTTPBearer()
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_uuid: str = payload.get("uuid")
+        if user_uuid is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_uuid
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="The token has expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Information cannot be verified.")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,7 +62,6 @@ task_processor: Optional[TaskProcessor] = None
 LOCAL_STORAGE_PATH = "./cloned_repos"
 
 class RepoRequest(BaseModel):
-    uuid: str
     url: str
     branch: Optional[str] = "main"
 
@@ -97,13 +126,13 @@ app = create_app()
 # Pydantic models for API
 
 class CredentialRequest(BaseModel):
-    id: str
-    name: str
+    provider_id: str
+    username: str
     token: str
 
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
-    repo_name: str = Field(..., description="Repository name")
+    repo_url: str = Field(..., description="Repository url")
     trace_error: str = Field(..., description="Error trace to fix")
     priority: int = Field(1, ge=1, le=5, description="Priority (1=highest, 5=lowest)")
     metadata: Optional[Dict] = Field(default_factory=dict, description="Additional metadata")
@@ -141,28 +170,35 @@ async def health():
     return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
 
 
-@app.post("/start", tags=["Credential"])
+@app.post("/api/start", tags=["Credential"])
 async def credential (
     body: CredentialRequest
 ):
     try:
 
-        user_uuid = get_or_create_user(body.id, body.name)
+        user = get_or_create_user(body.provider_id, body.username)
         data = {
-            "name": str(user_uuid["id"]), # type: ignore
+            "name": str(user["id"]), # type: ignore
             "type": "token",
             "token": body.token,
-            "username": body.name, # type: ignore
+            "username": body.username, # type: ignore
             "password": "string"
         }
-        base_api(apis["gitplugin"]["create"]["credentials"], body=data)
-        return {"status": "success", "user_id": user_uuid}
+        base_api(apis["gitplugin"]["credentials"]["create"], body=data)
+        access_token = create_access_token(data={"uuid": user["id"]}) # type: ignore
+
+
+        return {
+            "status": "success", 
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
     except Exception as e:
         return {"error": "API bên thứ ba lỗi", "details": str(e)}
 
 
-@app.post("/repo", tags=["Git"])
-async def repo(request: RepoRequest):
+@app.post("/api/repo", tags=["Git"])
+async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
     """
     Logic:
     1. Kiểm tra trạng thái qua /git/status.
@@ -172,8 +208,8 @@ async def repo(request: RepoRequest):
     """
     try:
         repo_hash = hashlib.md5(request.url.encode()).hexdigest()
-        workspace_path = f"codebase/{request.uuid}/{repo_hash}"
-        
+        workspace_path = f"codebase/{user_uuid}/{repo_hash}"
+        print(user_uuid)
         try:
             base_api(
                 apis["gitplugin"]["git"]["status"], 
@@ -190,11 +226,11 @@ async def repo(request: RepoRequest):
             logger.info(f"Repository not found. Setting up new repo from {request.url}...")
             setup_data = {
                 "repo_url": request.url,
-                "credential_name": request.uuid,
+                "credential_name": user_uuid,
                 "workspace_path": workspace_path
             }
             base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
-            create_repositorie(request.uuid, request.url, workspace_path)
+            create_repositorie(user_uuid, request.url, workspace_path)
 
         if request.branch:
             try:
@@ -275,65 +311,53 @@ async def status(queue_mgr: QueueManager = Depends(get_queue_manager)):
         "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
     }
 
-@app.post("/fix", response_model=FixResponseModel, tags=["Fix"])
-async def submit_fix_request(
-    request: FixRequestModel,
-    queue_mgr: QueueManager = Depends(get_queue_manager)
-) -> FixResponseModel:
-    """
-    Gửi yêu cầu Heal Code.
-    Input: FixRequestModel(repo_name, trace_error, priority, metadata)
-    """
-    try:
-        fix_request = FixRequest(
-            repo_name=request.repo_name,
-            trace_error=request.trace_error,
-            priority=request.priority,
-            metadata=request.metadata or {}
-        )
-        
-        response = await queue_mgr.submit_task(fix_request)
-        
-        return FixResponseModel(
-            request_id=response.request_id,
-            status=response.status.value,
-            message=response.message,
-            result=response.result,
-            error=response.error,
-            started_at=response.started_at.isoformat() if response.started_at else None,
-            completed_at=response.completed_at.isoformat() if response.completed_at else None,
-            execution_time_ms=response.execution_time_ms
-        )
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error submitting fix request: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
 @app.post("/api/fix/{repo}", response_model=FixResponseModel, tags=["Fix"])
 async def submit_fix_request(
     repo: str,
     request: FixRequestModel,
     trace_error: str,
-    queue_mgr: QueueManager = Depends(get_queue_manager)
+    queue_mgr: QueueManager = Depends(get_queue_manager),
+    user_uuid: str = Depends(get_current_user)
 ) -> FixResponseModel:
-    if (request): request.trace_error = trace_error
+    if request: 
+        request.trace_error = trace_error
     """
     Submit a code fix request
-    
-    Args:
-        repo: Repository name (path parameter)
-        request: Fix request details
-        
-    Returns:
-        Fix response with request ID and status
     """
     try:
+        workspace_path = get_local_path_by_id(user_uuid, request.repo_url)
+        if not workspace_path:
+            raise HTTPException(status_code=400, detail="User id Invalid or workspace not found")
+
+        branche = str(uuid.uuid4())
+        
+        # Lấy trạng thái hiện tại để lưu lại branch gốc
+        git_status = base_api(
+            apis["gitplugin"]["git"]["status"], 
+            params={"workspace_path": workspace_path}
+        )
+        original_branch = git_status.get("branch", "main")
+        
+        # Pull code mới nhất trên nhánh hiện tại
+        base_api(
+            apis["gitplugin"]["git"]["pull"], 
+            params={"workspace_path": workspace_path}
+        )
+        
+        # Khởi tạo cây mới và chuyển sang cây đó
+        base_api(
+            apis["gitplugin"]["git"]["branch_create"], 
+            body={
+                "workspace_path": workspace_path, 
+                "branch_name": branche, 
+                "checkout": True
+            }
+        )
+        
         # Create FixRequest from API model
         fix_request = FixRequest(
             repo_name=repo,
+            path=workspace_path, # type: ignore
             trace_error=request.trace_error,
             priority=request.priority,
             metadata=request.metadata or {}
@@ -341,6 +365,44 @@ async def submit_fix_request(
         
         # Submit to queue
         response = await queue_mgr.submit_task(fix_request)
+        print(response)
+        if response.status == TaskStatus.COMPLETED:
+            # Tiến hành commit các file đã sửa
+            base_api(
+                apis["gitplugin"]["git"]["commit"], 
+                body={
+                    "workspace_path": workspace_path,
+                    "message": "Automated fix applied",
+                    "files": ["*"] # Commit tất cả các thay đổi
+                }
+            )
+            base_api(
+                apis["gitplugin"]["git"]["push"], 
+                body={
+                    "workspace_path": workspace_path,
+                    "branch": branche
+                }
+            )
+            # Tạo Pull Request
+            base_api(
+                apis["gitplugin"]["git"]["pull_request"], 
+                body={
+                    "repo_url": repo,
+                    "credential_name": user_uuid,
+                    "source_branch": branche,
+                    "target_branch": original_branch,
+                    "title": f"Auto-fix for {repo}",
+                    "description": f"Automated fix for error:\n{trace_error}"
+                }
+            )
+
+        base_api(
+            apis["gitplugin"]["git"]["branch_switch"], 
+            body={
+                "workspace_path": workspace_path,
+                "branch_name": original_branch
+            }
+        )
         
         # Convert to API model
         return FixResponseModel(

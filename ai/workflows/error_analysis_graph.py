@@ -386,7 +386,7 @@ class ErrorAnalysisWorkflow:
         initial_state = create_initial_state(
             raw_error=error_text,
             workflow_id=workflow_id,
-            config=self.config.to_dict()
+            config=self.config.to_dict(),
         )
         
         # Set workspace path if provided
@@ -437,7 +437,7 @@ class ErrorAnalysisWorkflow:
                 node_context['cache_hit'] = True
             else:
                 # Parse the error
-                parsed_errors = await self.error_collector.parse_error_input(state['raw_error']) # type: ignore
+                parsed_errors = await self.error_collector.parse_error_input(state['raw_error'], state['workspace_path']) # type: ignore
                 print(parsed_errors)
                 
                 # Sanitize sensitive information
@@ -885,7 +885,7 @@ class ErrorAnalysisWorkflow:
                     
                     print("fix error: " + user_prompt)
                     
-                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt, state["parsed_errors"]) # type: ignore
+                    llm_response = await self.ai_service.debug_and_fix_with_context(full_prompt, state["parsed_errors"], workspace_path=state["workspace_path"]) # type: ignore
                     
                     # Parse LLM response as JSON
                     try:

@@ -88,6 +88,9 @@ class EnhancedContext:
     processing_time_ms: int = 0
     cache_hit: bool = False
 
+
+MAX_CONCURRENT_TASKS = 3
+api_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 class ErrorContextCollector:
     """Main orchestrator for collecting enhanced context around code errors"""
     
@@ -107,7 +110,7 @@ class ErrorContextCollector:
         self.max_files = max_files
         self.max_processing_time = max_processing_time
 
-    async def parse_error_input(self, error_input: str) -> List[ErrorInfo]:
+    async def parse_error_input(self, error_input: str, path_local_repo: str) -> List[ErrorInfo]:
         """
         Parse various error input formats:
         - "input undefined error main.js 33:12"
@@ -158,7 +161,7 @@ class ErrorContextCollector:
         matches = re.finditer(pattern4, error_input)
         if matches:
             for match in matches:
-                file_path = "./codebase/" + await self._find_correct_file_path("test-healcode", match.group(1))
+                file_path = "./codebase/" + await self._find_correct_file_path(path_local_repo, match.group(1))
                 error = ErrorInfo(
                     file_path=file_path,
                     line_number=int(match.group(2)),
@@ -172,7 +175,7 @@ class ErrorContextCollector:
         matches = re.finditer(pattern5, error_input)
         if matches:
             for match in matches:
-                file_path = "./codebase/" + await self._find_correct_file_path("codebase", match.group(1))
+                file_path = "./codebase/" + await self._find_correct_file_path(path_local_repo, match.group(1))
                 error = ErrorInfo(
                     file_path=file_path, # type: ignore
                     line_number=int(match.group(2)),
@@ -203,80 +206,99 @@ class ErrorContextCollector:
         key_data = f"{error_info.file_path}:{error_info.line_number}:{error_info.error_type}:{file_content_hash}"
         return hashlib.md5(key_data.encode()).hexdigest()
 
-    async def collect_enhanced_context(self, error_input: str) -> EnhancedContext:
-        """Main method to collect enhanced context for an error"""
+
+    async def collect_enhanced_context(self, error_input: str, workspace_path: str):
+        """
+        Main method to coordinate the collection of enhanced context for multiple errors.
+        This method handles the error_info array by processing each entry in parallel.
+        """
         start_time = time.time()
         
         try:
-            # Parse error input
-            error_info = self.parse_error_input(error_input)
+            # Parse error input which now returns a list of error objects
+            error_list = await self.parse_error_input(error_input, workspace_path)
             
-            # Check cache first
-            file_content = await self._get_file_content(error_info.file_path)
-            file_hash = hashlib.md5(file_content.encode()).hexdigest()
-            cache_key = self.generate_cache_key(error_info, file_hash)
+            if not error_list:
+                return []
+
+            # Create tasks for each error in the list to process them concurrently
+            # We pass the original input for summarization context
+            tasks = [self._process_single_error_context(info, error_input) for info in error_list]
             
-            cached_result = await self.cache_manager.get(cache_key)
-            if cached_result:
-                cached_result.cache_hit = True
-                return cached_result
+            # Execute all collection tasks in parallel
+            # return_exceptions=True ensures one failure doesn't crash the whole batch
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Create timeout context
-            async with asyncio.timeout(self.max_processing_time):
-                # First analyze target function, then search usage with function info
-                target_function = await self._analyze_target_function(error_info, file_content)
-                
-                # Execute remaining tasks in parallel with function info
-                context_tasks = await asyncio.gather(
-                    self._search_function_usage(error_info, target_function),
-                    self._extract_dependency_info(error_info),
-                    return_exceptions=True
-                )
-                
-                usage_contexts = context_tasks[0] if not isinstance(context_tasks[0], Exception) else []
-                dependency_info = context_tasks[1] if not isinstance(context_tasks[1], Exception) else {}
-                
-                # Create enhanced context
-                enhanced_context = EnhancedContext(
-                    original_error=error_info,
-                    target_function=target_function,
-                    usage_contexts=usage_contexts,
-                    dependency_info=dependency_info,
-                    processing_time_ms=int((time.time() - start_time) * 1000),
-                    cache_hit=False
-                )
-                
-                # Summarize if context is too large
-                if self._should_summarize_context(enhanced_context):
-                    enhanced_context.summary = await self.context_summarizer.summarize_context(
-                        enhanced_context, error_input
-                    )
-                
-                # Cache the result
-                await self.cache_manager.set(cache_key, enhanced_context, ttl=3600)  # 1 hour
-                
-                return enhanced_context
-                
-        except asyncio.TimeoutError:
-            # Return partial context if timeout
-            return EnhancedContext(
-                original_error=error_info,
-                target_function=None,
-                usage_contexts=[],
-                dependency_info={"error": "Timeout during context collection"},
-                processing_time_ms=self.max_processing_time * 1000,
-                cache_hit=False
-            )
+            # Filter out exceptions and return only successfully collected EnhancedContext objects
+            valid_results = [r for r in results if not isinstance(r, Exception)]
+            
+            return valid_results
+            
         except Exception as e:
-            # Return error context
-            return EnhancedContext(
-                original_error=error_info if 'error_info' in locals() else None,
-                target_function=None,
-                usage_contexts=[],
-                dependency_info={"error": str(e)},
-                processing_time_ms=int((time.time() - start_time) * 1000),
-                cache_hit=False
-            )
+            print(f"Failed to coordinate enhanced context collection: {e}")
+            return []
+
+    async def _process_single_error_context(self, error_info, original_input):
+        """
+        Internal logic to collect context for a single error object.
+        Uses a semaphore to control concurrency and avoid API rate limits.
+        """
+        # Use semaphore to guard the processing logic
+        async with api_semaphore:
+            start_time = time.time()
+            try:
+                # Fetch file content for hash generation and analysis
+                file_content = await self._get_file_content(error_info.file_path)
+                file_hash = hashlib.md5(file_content.encode()).hexdigest()
+                
+                # Check cache to avoid redundant expensive operations
+                cache_key = self.generate_cache_key(error_info, file_hash)
+                cached_result = await self.cache_manager.get(cache_key)
+                
+                if cached_result:
+                    cached_result.cache_hit = True
+                    return cached_result
+                
+                # Apply processing timeout to prevent hanging tasks
+                async with asyncio.timeout(self.max_processing_time):
+                    # Phase 1: Analyze the specific target function where the error occurred
+                    target_function = await self._analyze_target_function(error_info, file_content)
+                    
+                    # Phase 2: Execute usage search and dependency extraction in parallel
+                    context_tasks = await asyncio.gather(
+                        self._search_function_usage(error_info, target_function),
+                        self._extract_dependency_info(error_info),
+                        return_exceptions=True
+                    )
+                    
+                    # Safely extract results or default to empty values on failure
+                    usage_contexts = context_tasks[0] if not isinstance(context_tasks[0], Exception) else []
+                    dependency_info = context_tasks[1] if not isinstance(context_tasks[1], Exception) else {}
+                    
+                    # Initialize the context object with all gathered data
+                    enhanced_context = EnhancedContext(
+                        original_error=error_info,
+                        target_function=target_function,
+                        usage_contexts=usage_contexts,
+                        dependency_info=dependency_info,
+                        processing_time_ms=int((time.time() - start_time) * 1000),
+                        cache_hit=False
+                    )
+                    
+                    # Phase 3: Summarize if the collected data exceeds token limits
+                    if self._should_summarize_context(enhanced_context):
+                        enhanced_context.summary = await self.context_summarizer.summarize_context(
+                            enhanced_context, original_input
+                        )
+                    
+                    # Store processed result in cache for 1 hour
+                    await self.cache_manager.set(cache_key, enhanced_context, ttl=3600)
+                    
+                    return enhanced_context
+                    
+            except Exception as e:
+                print(f"Error collecting context for {error_info.file_path}: {e}")
+                raise e
 
     async def _find_correct_file_path(self, repo_name: str, path_error: str):
         # This is a fast, sync string operation.

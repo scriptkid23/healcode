@@ -31,6 +31,7 @@ def get_or_create_user(provider_id: str, name: str):
         # 2. Nếu đã tồn tại, trả về user đó luôn
         if existing_user.data:
             print(f"Welcome back, {name}!")
+            print(existing_user.data[0])
             return existing_user.data[0]
 
         # 3. Nếu chưa có, tiến hành tạo mới
@@ -70,9 +71,7 @@ def create_repositorie(user_id: str, git_url: str, local_path: str):
 
         # 2. Nếu chưa có, tạo mới bản ghi
         print(f"Adding new repository: {git_url}")
-        new_repo_id = str(uuid.uuid4())
         new_repo_data = {
-            "id": new_repo_id,
             "user_id": user_id,
             "git_url": git_url,
             "local_path": local_path,
@@ -87,4 +86,28 @@ def create_repositorie(user_id: str, git_url: str, local_path: str):
 
     except Exception as e:
         print(f"Lỗi khi lưu repository: {e}")
+        return None
+    
+def get_local_path_by_id(user_id: str, repo_url: str):
+    # Truy vấn cột local_path từ bảng repositories theo id
+    try:
+        response = (
+            supabase.table("repositories")
+            .select("local_path")
+            .eq("user_id", user_id)
+            .eq("git_url", repo_url)
+            .execute()
+        )
+        print(response)
+        
+        # Nếu tìm thấy bản ghi, trả về giá trị local_path
+        if response.data:
+            return response.data[0].get("local_path") # type: ignore
+            
+        # Không tìm thấy bản ghi nào khớp
+        return None
+        
+    except Exception as e:
+        # Bắt và in ra lỗi nếu quá trình truy vấn thất bại
+        print(f"Lỗi khi lấy local_path: {e}")
         return None

@@ -23,6 +23,7 @@ class FixRequest:
     """Request model for code fix operations"""
     repo_name: str
     trace_error: str
+    path: str
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=datetime.now)
     priority: int = 1  # 1 = highest, 5 = lowest

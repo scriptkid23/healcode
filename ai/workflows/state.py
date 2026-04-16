@@ -148,6 +148,7 @@ class AnalysisState(TypedDict):
     
     # Input
     raw_error: str
+    workspace_path: str
     workflow_id: str
     
     # Parsed Error Information
@@ -202,6 +203,7 @@ def create_initial_state(raw_error: str, workflow_id: str, config: Dict[str, Any
     return AnalysisState(
         # Input
         raw_error=raw_error,
+        workspace_path="",
         workflow_id=workflow_id,
         
         # Parsed Error Information
@@ -258,6 +260,7 @@ def state_to_json_output(state: AnalysisState) -> Dict[str, Any]:
     """
     return {
         "workflow_id": state["workflow_id"],
+        "workspace_path": state["config_snapshot"]["workspace_path"],
         "timestamp": time.time(),
         "error_info": {
             "raw_error": state["raw_error"],

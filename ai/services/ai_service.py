@@ -151,7 +151,7 @@ Your task is to provide a comprehensive fix based on this rich context. Consider
 Provide a detailed analysis with specific fixes and high confidence based on the enhanced context.
 """
 
-    async def debug_and_fix_with_context(self, error_input: str, error_info: List[ErrorInfo]) -> Dict[str, Any]:
+    async def debug_and_fix_with_context(self, error_input: str, error_info: List[ErrorInfo], workspace_path: str) -> Dict[str, Any]:
         """
         Enhanced debug and fix method that uses comprehensive context analysis
         
@@ -164,7 +164,7 @@ Provide a detailed analysis with specific fixes and high confidence based on the
         
         try:
             # Collect enhanced context using the error context collector
-            enhanced_context = await self.error_context_collector.collect_enhanced_context(error_input)
+            enhanced_context = await self.error_context_collector.collect_enhanced_context(error_input, workspace_path)
             
             # Log context loading information
             context_files_count = len(enhanced_context.usage_contexts) if enhanced_context.usage_contexts else 0

@@ -117,13 +117,33 @@ class QueueManager:
     
     async def submit_task(self, request: FixRequest) -> FixResponse:
         """Submit a new task to the queue"""
+        # Kiểm tra giới hạn hàng đợi
         if self._pending_queue.size() >= self.max_queue_size:
             return FixResponse.failed(
                 request.request_id,
                 "Queue is full. Please try again later."
             )
         
-        # Create task info
+        # Khởi tạo phản hồi ở trạng thái PENDING cho Client
+        response = FixResponse.processing(request.request_id)
+        # 1. Chạy phân tích lỗi để lấy thông tin chi tiết
+        analysis_result = await self._error_analysis_workflow.run_analysis(
+            request.trace_error, 
+            request.path
+        )
+        
+        # 2. Trích xuất và cập nhật các thông tin quan trọng từ kết quả phân tích vào metadata
+        updated_metadata = {
+            **request.metadata,
+            "analysis_id": analysis_result.get("workflow_id"),
+            "parsed_errors": analysis_result.get("error_info", {}).get("parsed_errors", []),
+            "affected_functions": analysis_result.get("affected_functions", []),
+            "risk_level": analysis_result.get("impact_analysis", {}).get("risk_level"),
+            "fix_suggestions": analysis_result.get("impact_analysis", {}).get("fix_suggestions", []),
+            "metrics": analysis_result.get("metrics", {})
+        }
+
+        # 3. Khởi tạo TaskInfo với dữ liệu đã được làm giàu thông tin
         task_info = TaskInfo(
             request_id=request.request_id,
             repo_name=request.repo_name,
@@ -131,24 +151,30 @@ class QueueManager:
             status=TaskStatus.PENDING,
             created_at=request.created_at,
             priority=request.priority,
-            metadata=request.metadata
+            metadata=updated_metadata
         )
-        test = await self._error_analysis_workflow.run_analysis(request.trace_error, "./codebase/content.js")
-        print(test)
         
-        # Store task and add to queue
+        # 4. Tự động đẩy mức ưu tiên lên cao nhất (priority = 1) nếu rủi ro được đánh giá là 'high'
+        if updated_metadata.get("risk_level") == "high":
+            task_info.priority = 1
+        
+        # Lưu trữ task và cập nhật thống kê hàng đợi
         with self._lock:
             self._tasks[request.request_id] = task_info
             self._stats.total_tasks += 1
             self._stats.pending_tasks += 1
         
+        # Đưa vào hàng đợi ưu tiên
         self._pending_queue.put(task_info)
         
-        # Create pending response
-        response = FixResponse.pending(request.request_id)
+        
         self._task_responses[request.request_id] = response
         
-        logger.info(f"Task {request.request_id} submitted for repo {request.repo_name}")
+        logger.info(
+            f"Task {request.request_id} submitted. "
+            f"Analysis ID: {updated_metadata['analysis_id']}, Risk: {updated_metadata['risk_level']}"
+        )
+        response = FixResponse.completed(request.request_id, analysis_result['impact_analysis'], analysis_result['metrics']['total_execution_time_ms'])
         return response
     
     def get_task_status(self, request_id: str) -> Optional[FixResponse]:
