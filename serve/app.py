@@ -387,7 +387,7 @@ async def submit_fix_request(
             base_api(
                 apis["gitplugin"]["git"]["pull_request"], 
                 body={
-                    "repo_url": repo,
+                    "repo_url": request.repo_url,
                     "credential_name": user_uuid,
                     "source_branch": branche,
                     "target_branch": original_branch,

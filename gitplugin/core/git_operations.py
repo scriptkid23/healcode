@@ -12,17 +12,19 @@ import asyncio
 import logging
 from typing import Dict, Optional, Any, List
 from pathlib import Path
-
-try:
-    from git import Repo, GitCommandError, InvalidGitRepositoryError, RemoteProgress
-    from git.remote import PushInfo, FetchInfo
-    HAS_GITPYTHON = True
-except ImportError:
-    HAS_GITPYTHON = False
-    # Define dummy classes for type hints
-    class Repo: pass
-    class GitCommandError(Exception): pass
-    class InvalidGitRepositoryError(Exception): pass
+from git import Repo, GitCommandError, InvalidGitRepositoryError, RemoteProgress
+from git.remote import PushInfo, FetchInfo
+HAS_GITPYTHON = True
+# try:
+#     from git import Repo, GitCommandError, InvalidGitRepositoryError, RemoteProgress
+#     from git.remote import PushInfo, FetchInfo
+#     HAS_GITPYTHON = True
+# except ImportError:
+#     HAS_GITPYTHON = False
+#     # Define dummy classes for type hints
+#     class Repo: pass
+#     class GitCommandError(Exception): pass
+#     class InvalidGitRepositoryError(Exception): pass
 
 
 class GitProgress(RemoteProgress):
@@ -69,7 +71,7 @@ class GitOperationsEngine:
                     repo = Repo(workspace_path)
                     # Update remote URL with new credentials
                     if auth_url != repo_url:  # Only update if we have credentials
-                        repo.remotes.origin.set_url(auth_url)
+                        repo.git.set_url(auth_url)
                     self.logger.info(f"Updated existing repository: {repo_url}")
                 except InvalidGitRepositoryError:
                     # Directory exists but not a Git repo, remove and clone fresh
@@ -143,15 +145,16 @@ class GitOperationsEngine:
         """Pull latest changes with detailed information and credential support"""
         try:
             repo = self._get_repository(workspace_path)
+            target_branch = repo.active_branch.name
             
             # Update remote URL with credentials if provided (for private repos)
             if credential and credential.get('type') and credential.get('type') != 'none':
                 try:
-                    current_url = repo.remotes.origin.url
+                    current_url = repo.git.url
                     # Check if URL already has auth (contains @)
                     if '@' not in current_url:
                         auth_url = self._prepare_auth_url(current_url, credential)
-                        repo.remotes.origin.set_url(auth_url)
+                        repo.git.set_url(auth_url)
                         self.logger.info("Updated remote URL with credentials for pull")
                 except Exception as e:
                     self.logger.warning(f"Could not update remote URL: {e}")
@@ -161,7 +164,7 @@ class GitOperationsEngine:
             
             # Fetch and pull with better error handling
             try:
-                origin = repo.remotes.origin
+                origin = repo.git
                 self.logger.info("Fetching changes from remote...")
                 fetch_info = origin.fetch()
                 
@@ -186,35 +189,40 @@ class GitOperationsEngine:
             # Get new commit
             new_commit = repo.head.commit.hexsha
             has_changes = old_commit != new_commit
-            
-            # Parse pull information
-            pull_details = []
-            for info in pull_info:
-                pull_details.append({
-                    'ref': str(info.ref),
-                    'old_commit': old_commit,
-                    'new_commit': str(info.commit),
-                    'flags': info.flags
-                })
-            
-            # Get changed files if there are changes
-            changed_files = []
-            if has_changes:
-                try:
-                    diff = repo.git.diff('--name-only', f'{old_commit}..{new_commit}')
-                    changed_files = diff.split('\n') if diff else []
-                except:
-                    pass
-            
-            return {
-                "status": "success",
-                "message": "Changes pulled successfully",
-                "has_changes": has_changes,
-                "old_commit": old_commit[:8],
-                "new_commit": new_commit[:8],
-                "changed_files": changed_files,
-                "details": pull_details
-            }
+            try:
+                # Parse pull information
+                pull_details = []
+                for info in pull_info:
+                    pull_details.append({
+                        'ref': str(info.ref),
+                        'old_commit': old_commit,
+                        'new_commit': str(info.commit),
+                        'flags': info.flags
+                    })
+                print(pull_details)
+                # Get changed files if there are changes
+                changed_files = []
+                if has_changes:
+                    try:
+                        diff = repo.git.diff('--name-only', f'{old_commit}..{new_commit}')
+                        changed_files = diff.split('\n') if diff else []
+                    except:
+                        pass
+                
+                return {
+                    "status": "success",
+                    "message": "Changes pulled successfully",
+                    "has_changes": has_changes,
+                    "old_commit": old_commit[:8],
+                    "new_commit": new_commit[:8],
+                    "changed_files": changed_files,
+                    "details": pull_details
+                }
+            except:
+                return {
+                    "status": "success",
+                    "message": pull_info,
+                }
             
         except Exception as e:
             self.logger.error(f"Pull failed: {e}")
@@ -302,8 +310,12 @@ class GitOperationsEngine:
                 pass
             
             # Push changes
-            origin = repo.remotes.origin
-            push_info = origin.push(branch)
+            origin = repo.git
+            print(origin)
+            try: 
+                push_info = origin.push("u", "origin", branch)
+            except:
+                push_info = origin.push("origin", branch)
             
             # Parse push results
             push_results = []
@@ -458,7 +470,7 @@ class GitOperationsEngine:
         """Get basic repository information"""
         try:
             return {
-                "url": repo.remotes.origin.url,
+                "url": repo.git.url,
                 "branch": repo.active_branch.name,
                 "commit": repo.head.commit.hexsha[:8],
                 "message": repo.head.commit.message.strip()

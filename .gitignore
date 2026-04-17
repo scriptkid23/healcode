@@ -211,3 +211,5 @@ __marimo__/
 /codebase/*
 
 .DS_Store
+
+/.vscode
