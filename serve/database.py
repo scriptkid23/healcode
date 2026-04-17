@@ -111,3 +111,26 @@ def get_local_path_by_id(user_id: str, repo_url: str):
         # Log query errors and return None
         print(f"Error while fetching local_path: {e}")
         return None
+
+def get_username_by_id(user_id: str):
+    # Query the local_path field from repositories by user and repo
+    try:
+        response = (
+            supabase.table("users")
+            .select("name")
+            .eq("id", user_id)
+            .execute()
+        )
+        
+        # Return local_path when a matching record exists
+        print(response)
+        if response.data:
+            return response.data[0].get("name") # type: ignore
+            
+        # No matching record found
+        return None
+        
+    except Exception as e:
+        # Log query errors and return None
+        print(f"Error while fetching local_path: {e}")
+        return None

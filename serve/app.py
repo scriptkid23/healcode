@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .models import BusinessLogicError, FixRequest, TaskStatus
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
-from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user
+from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user, get_username_by_id
 from .call_api import base_api, apis
 import uuid
 
@@ -159,10 +159,11 @@ class RepoRequest(BaseModel):
     url: str
     branch: Optional[str] = "main"
 class CredentialRequest(BaseModel):
-    provider_id: str
-    username: str
-    token: str
+    provider_id: str = "telegram"
+    username: str = "duongess"
 
+class TokenResquest(BaseModel):
+    token: str
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
     repo_url: str = Field(..., description="Repository url")
@@ -207,14 +208,6 @@ async def credential (
     body: CredentialRequest
 ):
     user = get_or_create_user(body.provider_id, body.username)
-    data = {
-        "name": str(user["id"]), # type: ignore
-        "type": "token",
-        "token": body.token,
-        "username": body.username, # type: ignore
-        "password": "string"
-    }
-    base_api(apis["gitplugin"]["credentials"]["create"], body=data)
     access_token = create_access_token(data={"uuid": user["id"]}) # type: ignore
 
 
@@ -223,6 +216,22 @@ async def credential (
         "token_type": "bearer"
     }
     return api_response(response)
+
+@app.post("/api/credential/token", tags=['Credential'])
+async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_current_user)):
+    data = {
+        "name": user_uuid, # type: ignore
+        "type": "token",
+        "token": body.token,
+        "username": get_username_by_id(user_uuid), # type: ignore
+        "password": "string"
+    }
+    base_api(apis["gitplugin"]["credentials"]["create"], body=data)
+    return api_response({'id': user_uuid})
+
+@app.get("/api/credential/me", tags=["Credential"])
+async def profile(user_uuid: str = Depends(get_current_user)):
+    return api_response({})
 
 @app.post("/api/repo", tags=["Git"])
 async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
@@ -272,7 +281,7 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
     return api_response(response)
 
 @app.get("/api/status", tags=["Git"])
-async def status(queue_mgr: QueueManager = Depends(get_queue_manager)):
+async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid: str = Depends(get_current_user)):
     """
     Returns the status of repositories currently held in local storage (has bug, fixing, update).
     """
