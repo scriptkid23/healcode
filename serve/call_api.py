@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Cấu hình URL mặc định giống như BACKEND_URL trong TS
+# Default URL config, similar to BACKEND_URL in TS
 BASE_URL = os.getenv("BASE_URL") or "https://khoai-axiom-backend.vercel.app"
 
-# Cấu trúc APIs bạn đã định nghĩa
+# API structure definitions
 apis = {
     "gitplugin": {
         "credentials": {
@@ -31,7 +31,7 @@ apis = {
             "pull": {
                 "method": "POST",
                 "endpoint": "/git/pull",
-                "params": ["workspace_path"] # Truyền qua Query Parameter
+                "params": ["workspace_path"] # Send via query parameters
             },
             "commit": {
                 "method": "POST",
@@ -51,7 +51,7 @@ apis = {
             "status": {
                 "method": "GET",
                 "endpoint": "/git/status",
-                "params": ["workspace_path"] # Truyền qua Query Parameter
+                "params": ["workspace_path"] # Send via query parameters
             },
             "branch_create": {
                 "method": "POST",
@@ -74,26 +74,26 @@ apis = {
 
 def base_api(api_config, body=None, params=None, path_params=None):
     """
-    api_config: Object từ biến apis (ví dụ: apis["gitplugin"]["git"]["pull"])
-    body: Dữ liệu gửi trong body (cho POST/PUT)
-    params: Dữ liệu gửi qua URL (Query strings)
-    path_params: Dữ liệu thay thế trong URL (ví dụ: {name})
+    api_config: API object from the apis map (example: apis["gitplugin"]["git"]["pull"])
+    body: Payload sent in request body (for POST/PUT)
+    params: Data sent as URL query strings
+    path_params: Placeholder replacements in endpoint path (example: {name})
     """
     method = api_config["method"]
     endpoint = api_config["endpoint"]
     
-    # 1. Xử lý Path Parameters (ví dụ: /credentials/{name})
+    # 1. Resolve path parameters (example: /credentials/{name})
     if path_params:
         endpoint = endpoint.format(**path_params)
     
-    url = f"http://localhost:8000{endpoint}" # Thay bằng URL thực tế của bạn
+    url = f"http://localhost:8000{endpoint}" # Replace with your actual service URL
 
     try:
-        # 2. Thực hiện gọi API tùy theo method
+        # 2. Call API using the configured method
         response = requests.request(
             method=method,
             url=url,
-            json=body,   # Tự động gửi JSON nếu body không None
+            json=body,   # Automatically sends JSON when body is not None
             params=params
         )
         

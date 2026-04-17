@@ -117,22 +117,22 @@ class QueueManager:
     
     async def submit_task(self, request: FixRequest) -> FixResponse:
         """Submit a new task to the queue"""
-        # Kiểm tra giới hạn hàng đợi
+        # Check queue capacity limit
         if self._pending_queue.size() >= self.max_queue_size:
             return FixResponse.failed(
                 request.request_id,
                 "Queue is full. Please try again later."
             )
         
-        # Khởi tạo phản hồi ở trạng thái PENDING cho Client
+        # Create initial processing response for the client
         response = FixResponse.processing(request.request_id)
-        # 1. Chạy phân tích lỗi để lấy thông tin chi tiết
+        # 1. Run error analysis to get detailed insights
         analysis_result = await self._error_analysis_workflow.run_analysis(
             request.trace_error, 
             request.path
         )
         
-        # 2. Trích xuất và cập nhật các thông tin quan trọng từ kết quả phân tích vào metadata
+        # 2. Extract key fields from analysis output and enrich metadata
         updated_metadata = {
             **request.metadata,
             "analysis_id": analysis_result.get("workflow_id"),
@@ -143,7 +143,7 @@ class QueueManager:
             "metrics": analysis_result.get("metrics", {})
         }
 
-        # 3. Khởi tạo TaskInfo với dữ liệu đã được làm giàu thông tin
+        # 3. Initialize TaskInfo with enriched metadata
         task_info = TaskInfo(
             request_id=request.request_id,
             repo_name=request.repo_name,
@@ -154,17 +154,17 @@ class QueueManager:
             metadata=updated_metadata
         )
         
-        # 4. Tự động đẩy mức ưu tiên lên cao nhất (priority = 1) nếu rủi ro được đánh giá là 'high'
+        # 4. Escalate priority to highest when risk level is high
         if updated_metadata.get("risk_level") == "high":
             task_info.priority = 1
         
-        # Lưu trữ task và cập nhật thống kê hàng đợi
+        # Store task and update queue statistics
         with self._lock:
             self._tasks[request.request_id] = task_info
             self._stats.total_tasks += 1
             self._stats.pending_tasks += 1
         
-        # Đưa vào hàng đợi ưu tiên
+        # Push task into priority queue
         self._pending_queue.put(task_info)
         
         

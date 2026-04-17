@@ -19,7 +19,7 @@ def fetchdata():
 
 def get_or_create_user(provider_id: str, name: str):
     try:
-        # 1. Kiểm tra xem user đã tồn tại chưa
+        # 1. Check whether the user already exists
         existing_user = (
             supabase.table("users")
             .select("*")
@@ -28,35 +28,35 @@ def get_or_create_user(provider_id: str, name: str):
             .execute()
         )
 
-        # 2. Nếu đã tồn tại, trả về user đó luôn
+        # 2. Return existing user if found
         if existing_user.data:
             print(f"Welcome back, {name}!")
             print(existing_user.data[0])
             return existing_user.data[0]
 
-        # 3. Nếu chưa có, tiến hành tạo mới
+        # 3. Create a new user if missing
         print(f"New user detected! Creating account for {name}...")
         new_uuid = str(uuid.uuid4())
         new_user_data = {
             "id": new_uuid,
             "name": name,
             "provider_id": provider_id,
-            # Bạn có thể lưu thêm name nếu muốn (cần thêm cột trong DB)
+            # You can store additional fields if needed (requires DB columns)
         }
         
         response = supabase.table("users").insert(new_user_data).execute()
         return response.data[0]
     except Exception as e:
-        print(f"Lỗi khi tạo user: {e}")
+        print(f"Error while creating user: {e}")
         return None
     
 def create_repositorie(user_id: str, git_url: str, local_path: str):
     """
-    Lưu thông tin repository vào bảng 'repositories'.
-    Kiểm tra nếu repo đã tồn tại dựa trên user_id và git_url thì trả về dữ liệu cũ.
+    Save repository metadata into the 'repositories' table.
+    Return existing data when a record with user_id and git_url already exists.
     """
     try:
-        # 1. Kiểm tra xem repository này của user đã được lưu chưa
+        # 1. Check whether this repository is already saved for the user
         existing_repo = (
             supabase.table("repositories")
             .select("*")
@@ -69,13 +69,13 @@ def create_repositorie(user_id: str, git_url: str, local_path: str):
             print(f"Repository {git_url} already exists for this user.")
             return existing_repo.data[0]
 
-        # 2. Nếu chưa có, tạo mới bản ghi
+        # 2. Insert a new record if missing
         print(f"Adding new repository: {git_url}")
         new_repo_data = {
             "user_id": user_id,
             "git_url": git_url,
             "local_path": local_path,
-            # "created_at": "now()" # Tùy thuộc vào thiết lập DB của bạn
+            # "created_at": "now()" # Depends on your DB setup
         }
 
         response = supabase.table("repositories").insert(new_repo_data).execute()
@@ -85,11 +85,11 @@ def create_repositorie(user_id: str, git_url: str, local_path: str):
         return None
 
     except Exception as e:
-        print(f"Lỗi khi lưu repository: {e}")
+        print(f"Error while saving repository: {e}")
         return None
     
 def get_local_path_by_id(user_id: str, repo_url: str):
-    # Truy vấn cột local_path từ bảng repositories theo id
+    # Query the local_path field from repositories by user and repo
     try:
         response = (
             supabase.table("repositories")
@@ -100,14 +100,14 @@ def get_local_path_by_id(user_id: str, repo_url: str):
         )
         print(response)
         
-        # Nếu tìm thấy bản ghi, trả về giá trị local_path
+        # Return local_path when a matching record exists
         if response.data:
             return response.data[0].get("local_path") # type: ignore
             
-        # Không tìm thấy bản ghi nào khớp
+        # No matching record found
         return None
         
     except Exception as e:
-        # Bắt và in ra lỗi nếu quá trình truy vấn thất bại
-        print(f"Lỗi khi lấy local_path: {e}")
+        # Log query errors and return None
+        print(f"Error while fetching local_path: {e}")
         return None
