@@ -12,17 +12,19 @@ import asyncio
 import logging
 from typing import Dict, Optional, Any, List
 from pathlib import Path
-
-try:
-    from git import Repo, GitCommandError, InvalidGitRepositoryError, RemoteProgress
-    from git.remote import PushInfo, FetchInfo
-    HAS_GITPYTHON = True
-except ImportError:
-    HAS_GITPYTHON = False
-    # Define dummy classes for type hints
-    class Repo: pass
-    class GitCommandError(Exception): pass
-    class InvalidGitRepositoryError(Exception): pass
+from git import Repo, GitCommandError, InvalidGitRepositoryError, RemoteProgress
+from git.remote import PushInfo, FetchInfo
+HAS_GITPYTHON = True
+# try:
+#     from git import Repo, GitCommandError, InvalidGitRepositoryError, RemoteProgress
+#     from git.remote import PushInfo, FetchInfo
+#     HAS_GITPYTHON = True
+# except ImportError:
+#     HAS_GITPYTHON = False
+#     # Define dummy classes for type hints
+#     class Repo: pass
+#     class GitCommandError(Exception): pass
+#     class InvalidGitRepositoryError(Exception): pass
 
 
 class GitProgress(RemoteProgress):
@@ -69,7 +71,7 @@ class GitOperationsEngine:
                     repo = Repo(workspace_path)
                     # Update remote URL with new credentials
                     if auth_url != repo_url:  # Only update if we have credentials
-                        repo.remotes.origin.set_url(auth_url)
+                        repo.git.set_url(auth_url)
                     self.logger.info(f"Updated existing repository: {repo_url}")
                 except InvalidGitRepositoryError:
                     # Directory exists but not a Git repo, remove and clone fresh
@@ -143,30 +145,32 @@ class GitOperationsEngine:
         """Pull latest changes with detailed information and credential support"""
         try:
             repo = self._get_repository(workspace_path)
+            target_branch = repo.active_branch.name
             
             # Update remote URL with credentials if provided (for private repos)
             if credential and credential.get('type') and credential.get('type') != 'none':
                 try:
-                    current_url = repo.remotes.origin.url
+                    current_url = repo.git.url
                     # Check if URL already has auth (contains @)
                     if '@' not in current_url:
                         auth_url = self._prepare_auth_url(current_url, credential)
-                        repo.remotes.origin.set_url(auth_url)
+                        repo.git.set_url(auth_url)
                         self.logger.info("Updated remote URL with credentials for pull")
                 except Exception as e:
                     self.logger.warning(f"Could not update remote URL: {e}")
             
             # Get current commit for comparison
             old_commit = repo.head.commit.hexsha
+            print(old_commit)
             
             # Fetch and pull with better error handling
             try:
-                origin = repo.remotes.origin
+                origin = repo.git
                 self.logger.info("Fetching changes from remote...")
                 fetch_info = origin.fetch()
                 
                 self.logger.info("Pulling changes...")
-                pull_info = origin.pull()
+                pull_info = origin.pull('origin', target_branch)
                 
             except GitCommandError as git_e:
                 error_msg = str(git_e)
@@ -302,8 +306,12 @@ class GitOperationsEngine:
                 pass
             
             # Push changes
-            origin = repo.remotes.origin
-            push_info = origin.push(branch)
+            origin = repo.git
+            print(origin)
+            try: 
+                push_info = origin.push("u", "origin", branch)
+            except:
+                push_info = origin.push("origin", branch)
             
             # Parse push results
             push_results = []
@@ -458,7 +466,7 @@ class GitOperationsEngine:
         """Get basic repository information"""
         try:
             return {
-                "url": repo.remotes.origin.url,
+                "url": repo.git.url,
                 "branch": repo.active_branch.name,
                 "commit": repo.head.commit.hexsha[:8],
                 "message": repo.head.commit.message.strip()
