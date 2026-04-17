@@ -194,7 +194,7 @@ def get_queue_manager() -> QueueManager:
 async def root():
     fetchdata()
     """Root endpoint"""
-    return api_response({"message": "Code Fix Service API", "version": "1.0.0"})
+    return api_response({"app": "Code Fix Service API", "version": "1.0.0"})
 
 
 @app.get("/health", tags=["Health"])
@@ -227,7 +227,7 @@ async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_cur
         "password": "string"
     }
     base_api(apis["gitplugin"]["credentials"]["create"], body=data)
-    return api_response({'id': user_uuid})
+    return api_response(user_uuid)
 
 @app.get("/api/credential/me", tags=["Credential"])
 async def profile(user_uuid: str = Depends(get_current_user)):
