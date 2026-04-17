@@ -161,7 +161,6 @@ class GitOperationsEngine:
             
             # Get current commit for comparison
             old_commit = repo.head.commit.hexsha
-            print(old_commit)
             
             # Fetch and pull with better error handling
             try:
@@ -170,7 +169,7 @@ class GitOperationsEngine:
                 fetch_info = origin.fetch()
                 
                 self.logger.info("Pulling changes...")
-                pull_info = origin.pull('origin', target_branch)
+                pull_info = origin.pull()
                 
             except GitCommandError as git_e:
                 error_msg = str(git_e)
@@ -190,35 +189,40 @@ class GitOperationsEngine:
             # Get new commit
             new_commit = repo.head.commit.hexsha
             has_changes = old_commit != new_commit
-            
-            # Parse pull information
-            pull_details = []
-            for info in pull_info:
-                pull_details.append({
-                    'ref': str(info.ref),
-                    'old_commit': old_commit,
-                    'new_commit': str(info.commit),
-                    'flags': info.flags
-                })
-            
-            # Get changed files if there are changes
-            changed_files = []
-            if has_changes:
-                try:
-                    diff = repo.git.diff('--name-only', f'{old_commit}..{new_commit}')
-                    changed_files = diff.split('\n') if diff else []
-                except:
-                    pass
-            
-            return {
-                "status": "success",
-                "message": "Changes pulled successfully",
-                "has_changes": has_changes,
-                "old_commit": old_commit[:8],
-                "new_commit": new_commit[:8],
-                "changed_files": changed_files,
-                "details": pull_details
-            }
+            try:
+                # Parse pull information
+                pull_details = []
+                for info in pull_info:
+                    pull_details.append({
+                        'ref': str(info.ref),
+                        'old_commit': old_commit,
+                        'new_commit': str(info.commit),
+                        'flags': info.flags
+                    })
+                print(pull_details)
+                # Get changed files if there are changes
+                changed_files = []
+                if has_changes:
+                    try:
+                        diff = repo.git.diff('--name-only', f'{old_commit}..{new_commit}')
+                        changed_files = diff.split('\n') if diff else []
+                    except:
+                        pass
+                
+                return {
+                    "status": "success",
+                    "message": "Changes pulled successfully",
+                    "has_changes": has_changes,
+                    "old_commit": old_commit[:8],
+                    "new_commit": new_commit[:8],
+                    "changed_files": changed_files,
+                    "details": pull_details
+                }
+            except:
+                return {
+                    "status": "success",
+                    "message": pull_info,
+                }
             
         except Exception as e:
             self.logger.error(f"Pull failed: {e}")
