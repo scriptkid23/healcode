@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .models import BusinessLogicError, FixRequest, TaskStatus
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
-from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user, get_username_by_id
+from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user, get_repo_by_id, get_username_by_id
 from .call_api import base_api, apis
 import uuid
 
@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 # Global queue manager
 queue_manager: Optional[QueueManager] = None
 task_processor: Optional[TaskProcessor] = None
+current_git_context: Dict[str, Dict[str, str]] = {}
 
 # Define where you want to store the repos locally
 LOCAL_STORAGE_PATH = "./cloned_repos"
@@ -164,6 +165,17 @@ class CredentialRequest(BaseModel):
 
 class TokenResquest(BaseModel):
     token: str
+
+
+class GitRepoSelectionRequest(BaseModel):
+    git_url: str
+
+
+class GitBranchSwitchRequest(BaseModel):
+    branch: str
+    git_url: Optional[str] = None
+
+
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
     repo_url: str = Field(..., description="Repository url")
@@ -233,7 +245,7 @@ async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_cur
 async def profile(user_uuid: str = Depends(get_current_user)):
     return api_response({})
 
-@app.post("/api/repo", tags=["Git"])
+@app.post("/api/git/repo", tags=["Git"])
 async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
     repo_hash = hashlib.md5(request.url.encode()).hexdigest()
     workspace_path = f"codebase/{user_uuid}/{repo_hash}"
@@ -278,9 +290,13 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
         "message": f"Repository synchronized successfully and switched to branch {request.branch or 'default'}.",
         "local_path": workspace_path
     }
+    current_git_context[user_uuid] = {
+        "git_url": request.url,
+        "workspace_path": workspace_path
+    }
     return api_response(response)
 
-@app.get("/api/status", tags=["Git"])
+@app.get("/api/git/status", tags=["Git"])
 async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid: str = Depends(get_current_user)):
     """
     Returns the status of repositories currently held in local storage (has bug, fixing, update).
@@ -333,6 +349,89 @@ async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid
         "repos": results,
         "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
     })
+
+@app.get("/api/git/list", tags=["Git"])
+async def list_repos(user_uuid: str = Depends(get_current_user)):
+    return api_response(get_repo_by_id(user_uuid))
+
+
+@app.put("/api/git/branche", tags=["Git"])
+async def switch_git_branch(
+    body: GitBranchSwitchRequest,
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    selected_git_url = body.git_url
+    workspace_path = None
+
+    if selected_git_url:
+        workspace_path = get_local_path_by_id(user_uuid, selected_git_url)
+    else:
+        raise BusinessLogicError(
+            code=400,
+            message=f"No repository selected. Call PUT /api/git/branche first or pass git_url"
+        )
+    try:
+        workspace_path = get_local_path_by_id(user_uuid, selected_git_url)
+        checkout = base_api(
+            apis["gitplugin"]["git"]["branch_switch"],
+            body={"workspace_path": workspace_path, "branch_name": body.branch}
+        )
+        print(checkout)
+    except Exception:
+        raise BusinessLogicError(
+            code=404,
+            message=f"Branch '{body.branch}' does not exist or is not accessible."
+        )
+
+    git_status = base_api(
+        apis["gitplugin"]["git"]["status"],
+        params={"workspace_path": workspace_path}
+    )
+
+    return api_response(
+        {
+            "message": "Branch switched successfully",
+            "git_url": selected_git_url,
+            "branch": git_status.get("branch", body.branch)
+        }
+    )
+
+
+@app.get("/api/git/where", tags=["Git"])
+async def git_where(
+    git_url: Optional[str] = None,
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    selected_git_url = git_url
+    workspace_path = None
+
+    if selected_git_url:
+        workspace_path = get_local_path_by_id(user_uuid, selected_git_url)
+    else:
+        user_context = current_git_context.get(user_uuid)
+        if user_context:
+            selected_git_url = user_context.get("git_url")
+            workspace_path = user_context.get("workspace_path")
+
+    if not selected_git_url or not workspace_path:
+        raise BusinessLogicError(
+            code=400,
+            message=f"No repository selected. Call PUT /api/git/where first or pass git_url"
+        )
+
+    git_status = base_api(
+        apis["gitplugin"]["git"]["status"],
+        params={"workspace_path": workspace_path}
+    )
+
+    return api_response(
+        {
+            "git_url": selected_git_url,
+            "branch": git_status.get("branch", "unknown"),
+            "commit": git_status.get("commit", "No commited"),
+            "message": git_status.get("commit_message", "No message"),
+        }
+    )
 
 @app.post("/api/fix/{repo}", tags=["Fix"])
 async def submit_fix_request(

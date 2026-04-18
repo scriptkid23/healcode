@@ -134,3 +134,25 @@ def get_username_by_id(user_id: str):
         # Log query errors and return None
         print(f"Error while fetching local_path: {e}")
         return None
+    
+def get_repo_by_id(user_id: str):
+    try:
+        response = (
+            supabase.table("repositories")
+            .select("git_url")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        print(response)
+        
+        # Return local_path when a matching record exists
+        if response.data:
+            return list(map(lambda x: x["git_url"], response.data)) # type: ignore
+            
+        # No matching record found
+        return None
+        
+    except Exception as e:
+        # Log query errors and return None
+        print(f"Error while fetching local_path: {e}")
+        return None
