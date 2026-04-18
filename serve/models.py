@@ -5,8 +5,10 @@ Data models for API requests and responses
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Generic, Optional, Dict, Any, List, TypeVar
 import uuid
+
+from pydantic import BaseModel
 
 
 class TaskStatus(Enum):
@@ -21,6 +23,7 @@ class TaskStatus(Enum):
 @dataclass
 class FixRequest:
     """Request model for code fix operations"""
+    user_id: str
     repo_name: str
     trace_error: str
     path: str
@@ -98,6 +101,7 @@ class FixResponse:
 @dataclass
 class TaskInfo:
     """Information about a queued task"""
+    user_id: str
     request_id: str
     repo_name: str
     trace_error: str
@@ -134,3 +138,9 @@ class WorkerInfo:
     tasks_processed: int = 0
     last_heartbeat: Optional[datetime] = None
     started_at: datetime = field(default_factory=datetime.now) 
+
+@dataclass
+class BusinessLogicError(Exception):
+    code: int
+    message: str
+    status: bool = False

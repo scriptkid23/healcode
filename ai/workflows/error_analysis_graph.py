@@ -889,8 +889,8 @@ class ErrorAnalysisWorkflow:
                     
                     # Parse LLM response as JSON
                     try:
-                        print("llm_response: " + json.dumps(llm_response, indent=2))
-                        await self._editer_code(llm_response) # type: ignore
+                        print("llm_response: " + json.dumps(llm_response))
+                        await self._editer_code(state["workspace_path"], llm_response) # type: ignore
                         impact_analysis:ImpactAnalysis = ImpactAnalysis.convert_llm_response_to_impact(llm_response) # type: ignore
 
                     except (json.JSONDecodeError, TypeError):
@@ -1036,22 +1036,35 @@ class ErrorAnalysisWorkflow:
 
         return ordered
     
-    async def _editer_code(self, llm_response:Dict[str, Any]):
-        file_fixes = llm_response["file_fixes"]
+    async def _editer_code(self, workspace_path: str, llm_response: Dict[str, Any]):
+        file_fixes = llm_response.get("file_fixes", [])
         for file in file_fixes:
             try:
-                print("fix: ", file["file_path"])
+                file_path = file.get("file_path")
+                if not file_path:
+                    continue
+
+                if workspace_path in file_path:
+                    final_path = file_path
+                else:
+                    final_path = os.path.join(workspace_path, file_path)
+
                 result_batch = await self.editer_manager.edit_lines( # type: ignore
-                    file_path=file["file_path"],
+                    file_path=final_path,
                     line_numbers=file["line_numbers"],
                     new_contents=file["new_contents"],
                     options=EditOptions(create_backup=True)
                 )
-                print("\nBatch edit result:", result_batch)
-            except:
-                print(f"Failed to edit file {llm_response["context_used"]["error_info"]["file"]}")
-                raise ValueError(f"Failed to edit file {llm_response["context_used"].error_info.file}")
-
+                print(f"\nBatch edit result for {final_path}: {result_batch}")
+                
+            except Exception as e:
+                context = llm_response.get("context_used", {})
+                error_info = context.get("error_info", {})
+                target_file = error_info.get("file", "unknown_file")
+                
+                print(f"Failed to edit file {target_file}. Error: {str(e)}")
+                raise ValueError(f"Failed to edit file {target_file}") from e
+            
     def _create_fallback_analysis(self, state: AnalysisState) -> ImpactAnalysis:
         """Create fallback analysis when LLM fails"""
         # Simple heuristic-based analysis

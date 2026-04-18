@@ -5,27 +5,34 @@ FastAPI application for code fix service
 import hashlib
 import logging
 from contextlib import asynccontextmanager
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import os
-from git import Repo, GitCommandError
-from fastapi import FastAPI, Form, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .models import FixRequest, FixResponse, TaskStatus, QueueStats, TaskInfo
+from .models import BusinessLogicError, FixRequest, TaskStatus
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
-from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user
+from .database import (
+    create_repositorie,
+    fetchdata,
+    get_local_path_by_id,
+    get_or_create_user,
+    get_repo_by_id,
+    get_repo_current,
+    get_username_by_id,
+    set_repo_current,
+)
 from .call_api import base_api, apis
 import uuid
 
-# Thêm các import cần thiết
 import jwt
 from datetime import datetime, timedelta
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-# Cấu hình JWT
+# JWT configuration
 SECRET_KEY = os.getenv("JWT_SECRET", "")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 518400
@@ -43,12 +50,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_uuid: str = payload.get("uuid")
         if user_uuid is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise BusinessLogicError(code=401, message="Invalid token")
         return user_uuid
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="The token has expired")
+        raise BusinessLogicError(code=401, message="The token has expired")
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Information cannot be verified.")
+        raise BusinessLogicError(code=401, message="Information cannot be verified.")
+    
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -58,12 +66,11 @@ logger = logging.getLogger(__name__)
 queue_manager: Optional[QueueManager] = None
 task_processor: Optional[TaskProcessor] = None
 
-# Define where you want to store the repos locally
-LOCAL_STORAGE_PATH = "./cloned_repos"
-
-class RepoRequest(BaseModel):
-    url: str
-    branch: Optional[str] = "main"
+def api_response(data: Any = None, code: int = 200, status: bool = True, message: Optional[str] = None):
+    response = {"status": status, "code": code, "data": data}
+    if message is not None:
+        response["message"] = message
+    return response
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -99,8 +106,6 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    """Create and configure FastAPI application"""
-    
     app = FastAPI(
         title="Code Fix Service",
         description="API for automated code fixing using AI",
@@ -108,31 +113,73 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
     
-    # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure as needed
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
+    @app.exception_handler(BusinessLogicError)
+    async def business_logic_exception_handler(request: Request, exc: BusinessLogicError):
+        logging.warning(f"Business error at {request.url}: {exc.message}")
+        return JSONResponse(
+            status_code=exc.code,
+            content=api_response(data=None, code=exc.code, status=False, message=exc.message)
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        logging.warning(f"HTTP error at {request.url}: {exc.detail}")
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=api_response(
+                data=None,
+                code=exc.status_code,
+                status=False,
+                message=str(exc.detail)
+            )
+        )
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logging.error(f"Unhandled exception at {request.url}: {str(exc)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=api_response(
+                data=None,
+                code=500,
+                status=False,
+                message="An internal system error occurred."
+            )
+        )    
     return app
 
 
 app = create_app()
 
-
-# Pydantic models for API
-
+class RepoRequest(BaseModel):
+    url: str
+    branch: Optional[str] = "main"
 class CredentialRequest(BaseModel):
-    provider_id: str
-    username: str
+    provider_id: str = "telegram"
+    username: str = "duongess"
+
+class TokenResquest(BaseModel):
     token: str
+
+
+class GitRepoSelectionRequest(BaseModel):
+    git_url: str
+
+
+class GitBranchSwitchRequest(BaseModel):
+    branch: str
+
 
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
-    repo_url: str = Field(..., description="Repository url")
     trace_error: str = Field(..., description="Error trace to fix")
     priority: int = Field(1, ge=1, le=5, description="Priority (1=highest, 5=lowest)")
     metadata: Optional[Dict] = Field(default_factory=dict, description="Additional metadata")
@@ -141,6 +188,8 @@ class FixRequestModel(BaseModel):
 class FixResponseModel(BaseModel):
     """API model for fix responses"""
     request_id: str
+    branche: str
+    pr_url: str
     status: str
     message: str
     result: Optional[Dict] = None
@@ -156,284 +205,301 @@ def get_queue_manager() -> QueueManager:
         raise HTTPException(status_code=500, detail="Queue manager not initialized")
     return queue_manager
 
-
 @app.get("/", tags=["Health"])
 async def root():
     fetchdata()
     """Root endpoint"""
-    return {"message": "Code Fix Service API", "version": "1.0.0"}
+    return api_response({"app": "Code Fix Service API", "version": "1.0.0"})
 
 
 @app.get("/health", tags=["Health"])
 async def health():
     """Health check endpoint"""
-    return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
+    return api_response({"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"})
 
 
-@app.post("/api/start", tags=["Credential"])
+@app.post("/api/credential", tags=["Credential"])
 async def credential (
     body: CredentialRequest
 ):
-    try:
-
-        user = get_or_create_user(body.provider_id, body.username)
-        data = {
-            "name": str(user["id"]), # type: ignore
-            "type": "token",
-            "token": body.token,
-            "username": body.username, # type: ignore
-            "password": "string"
-        }
-        base_api(apis["gitplugin"]["credentials"]["create"], body=data)
-        access_token = create_access_token(data={"uuid": user["id"]}) # type: ignore
+    user = get_or_create_user(body.provider_id, body.username)
+    access_token = create_access_token(data={"uuid": user["id"]}) # type: ignore
 
 
-        return {
-            "status": "success", 
-            "access_token": access_token,
-            "token_type": "bearer"
-        }
-    except Exception as e:
-        return {"error": "API bên thứ ba lỗi", "details": str(e)}
-
-
-@app.post("/api/repo", tags=["Git"])
-async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
-    """
-    Logic:
-    1. Kiểm tra trạng thái qua /git/status.
-    2. Nếu đã tồn tại: Pull code mới nhất.
-    3. Nếu chưa tồn tại: Setup (Clone) repository.
-    4. Chuyển sang branch (cây) yêu cầu. Nếu branch không tồn tại, báo lỗi.
-    """
-    try:
-        repo_hash = hashlib.md5(request.url.encode()).hexdigest()
-        workspace_path = f"codebase/{user_uuid}/{repo_hash}"
-        print(user_uuid)
-        try:
-            base_api(
-                apis["gitplugin"]["git"]["status"], 
-                params={"workspace_path": workspace_path}
-            )
-
-            logger.info(f"Repository exists at {workspace_path}. Pulling changes...")
-            base_api(
-                apis["gitplugin"]["git"]["pull"], 
-                params={"workspace_path": workspace_path}
-            )
-        
-        except:
-            logger.info(f"Repository not found. Setting up new repo from {request.url}...")
-            setup_data = {
-                "repo_url": request.url,
-                "credential_name": user_uuid,
-                "workspace_path": workspace_path
-            }
-            base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
-            create_repositorie(user_uuid, request.url, workspace_path)
-
-        if request.branch:
-            try:
-                switch_data = {
-                    "workspace_path": workspace_path,
-                    "branch_name": request.branch
-                }
-                base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
-                
-            except Exception:
-                raise HTTPException(
-                    status_code=404, 
-                    detail=f"Cây (Branch) '{request.branch}' không tồn tại hoặc không thể truy cập."
-                )
-
-        return {
-            "status": "success",
-            "message": f"Đã đồng bộ thành công repository và chuyển sang nhánh {request.branch or 'mặc định'}.",
-            "local_path": workspace_path
-        }
-
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as e:
-        logger.error(f"Lỗi thực hiện luồng repo: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
-@app.get("/status", tags=["Credential"])
-async def status(queue_mgr: QueueManager = Depends(get_queue_manager)):
-    """
-    Returns the status of repositories currently held in local storage (has bug, fixing, update).
-    """
-    # 1. Check if storage directory exists
-    if not os.path.exists(LOCAL_STORAGE_PATH):
-        return {"repos": [], "storage_root": None}
-
-    # 2. Get list of physical folders (repositories)
-    repo_dirs = [d for d in os.listdir(LOCAL_STORAGE_PATH) 
-                 if os.path.isdir(os.path.join(LOCAL_STORAGE_PATH, d))]
-    
-    # 3. Get all tasks to cross-reference status
-    all_tasks = queue_mgr.get_all_tasks()
-    
-    # Helper to find the latest status for a specific repo
-    def get_repo_status(repo_name):
-        # Filter tasks for this repo
-        repo_tasks = [t for t in all_tasks if t.repo_name == repo_name]
-        
-        if not repo_tasks:
-            return "idle" # No tasks ever run for this repo
-            
-        # Get the most recent task
-        latest_task = sorted(repo_tasks, key=lambda x: x.created_at, reverse=True)[0]
-        
-        # Map TaskStatus to your requested terms
-        if latest_task.status.value == "processing":
-            return "fixing"
-        elif latest_task.status.value == "pending":
-            return "has bug" # It is in queue waiting to be fixed
-        elif latest_task.status.value == "completed":
-            return "update" # Fix completed, repo is updated
-        elif latest_task.status.value == "failed":
-            return "has bug" # Fix failed, likely still has bug
-        else:
-            return latest_task.status.value
-
-    # 4. Build the result list
-    results = []
-    for repo in repo_dirs:
-        results.append({
-            "name": repo,
-            "status": get_repo_status(repo),
-            "path": os.path.abspath(os.path.join(LOCAL_STORAGE_PATH, repo))
-        })
-
-    return {
-        "count": len(results),
-        "repos": results,
-        "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
+    response = {
+        "access_token": access_token,
+        "token_type": "bearer"
     }
+    return api_response(response)
 
-@app.post("/api/fix/{repo}", response_model=FixResponseModel, tags=["Fix"])
+@app.post("/api/credential/token", tags=['Credential'])
+async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_current_user)):
+    data = {
+        "name": user_uuid, # type: ignore
+        "type": "token",
+        "token": body.token,
+        "username": get_username_by_id(user_uuid), # type: ignore
+        "password": "string"
+    }
+    base_api(apis["gitplugin"]["credentials"]["create"], body=data)
+    return api_response(user_uuid)
+
+@app.get("/api/credential/me", tags=["Credential"])
+async def profile(user_uuid: str = Depends(get_current_user)):
+    return api_response({})
+
+@app.post("/api/git/repo", tags=["Git"])
+async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
+    repo_hash = hashlib.md5(request.url.encode()).hexdigest()
+    workspace_path = f"codebase/{user_uuid}/{repo_hash}"
+    print(user_uuid)
+    try:
+        base_api(
+            apis["gitplugin"]["git"]["status"], 
+            params={"workspace_path": workspace_path}
+        )
+
+        logger.info(f"Repository exists at {workspace_path}. Pulling changes...")
+        base_api(
+            apis["gitplugin"]["git"]["pull"], 
+            params={"workspace_path": workspace_path}
+        )
+    
+    except:
+        logger.info(f"Repository not found. Setting up new repo from {request.url}...")
+        setup_data = {
+            "repo_url": request.url,
+            "credential_name": user_uuid,
+            "workspace_path": workspace_path
+        }
+        base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
+        create_repositorie(user_uuid, request.url, workspace_path)
+
+    if request.branch:
+        try:
+            switch_data = {
+                "workspace_path": workspace_path,
+                "branch_name": request.branch
+            }
+            base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
+            
+        except Exception:
+            raise BusinessLogicError(
+                code=404, 
+                message=f"Branch '{request.branch}' does not exist or is not accessible."
+            )
+
+    response = {
+        "message": f"Repository synchronized successfully and switched to branch {request.branch or 'default'}.",
+        "local_path": workspace_path
+    }
+    set_repo_current(user_uuid, request.url)
+    return api_response(response)
+
+@app.get("/api/git/repo", tags=["Git"])
+async def list_repos(user_uuid: str = Depends(get_current_user)):
+    return api_response(get_repo_by_id(user_uuid))
+
+
+@app.put("/api/git/repo", tags=["Git"])
+async def update_current_repos(
+    body: GitRepoSelectionRequest,
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    current_repo = set_repo_current(user_uuid, body.git_url)
+    if not current_repo:
+        raise BusinessLogicError(code=400, message="Unable to update current repository.")
+
+    return api_response(
+        data = body.git_url,
+        message="Current repository updated successfully"
+    )
+
+@app.put("/api/git/branche", tags=["Git"])
+async def switch_git_branch(
+    body: GitBranchSwitchRequest,
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    selected_git_url = get_repo_current(user_uuid)
+    workspace_path = get_local_path_by_id(user_uuid)
+    if not selected_git_url or not workspace_path:
+        raise BusinessLogicError(
+            code=400,
+            message="No current repository selected. Call PUT /api/git/repo first."
+        )
+    try:
+        checkout = base_api(
+            apis["gitplugin"]["git"]["branch_switch"],
+            body={"workspace_path": workspace_path, "branch_name": body.branch}
+        )
+        print(checkout)
+    except Exception:
+        raise BusinessLogicError(
+            code=404,
+            message=f"Branch '{body.branch}' does not exist or is not accessible."
+        )
+
+    git_status = base_api(
+        apis["gitplugin"]["git"]["status"],
+        params={"workspace_path": workspace_path}
+    )
+
+    return api_response(
+        data = {
+            "git_url": selected_git_url,
+            "branch": git_status.get("branch", body.branch)
+        },
+        message = "Branch switched successfully"
+    )
+
+
+@app.get("/api/git/status", tags=["Git"])
+async def git_where(
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    selected_git_url = get_repo_current(user_uuid)
+    workspace_path = get_local_path_by_id(user_uuid)
+
+    if not selected_git_url or not workspace_path:
+        raise BusinessLogicError(
+            code=400,
+            message="No current repository selected. Call PUT /api/git/repo first."
+        )
+
+    git_status = base_api(
+        apis["gitplugin"]["git"]["status"],
+        params={"workspace_path": workspace_path}
+    )
+
+    return api_response(
+        {
+            "git_url": selected_git_url,
+            "branch": git_status.get("branch", "unknown"),
+            "commit": git_status.get("commit", "No commited"),
+            "message": git_status.get("commit_message", "No message"),
+        }
+    )
+
+@app.post("/api/fix", tags=["Fix"])
 async def submit_fix_request(
-    repo: str,
     request: FixRequestModel,
     trace_error: str,
     queue_mgr: QueueManager = Depends(get_queue_manager),
     user_uuid: str = Depends(get_current_user)
-) -> FixResponseModel:
+) -> Dict[str, Any]:
     if request: 
         request.trace_error = trace_error
     """
     Submit a code fix request
     """
-    try:
-        workspace_path = get_local_path_by_id(user_uuid, request.repo_url)
-        if not workspace_path:
-            raise HTTPException(status_code=400, detail="User id Invalid or workspace not found")
+    current_repo_url = get_repo_current(user_uuid)
+    workspace_path = get_local_path_by_id(user_uuid)
+    if not workspace_path:
+        raise HTTPException(status_code=400, detail="Current repo is invalid or workspace not found")
+    if not current_repo_url:
+        raise HTTPException(status_code=400, detail="Current repo is not selected")
 
-        branche = str(uuid.uuid4())
-        
-        # Lấy trạng thái hiện tại để lưu lại branch gốc
-        git_status = base_api(
-            apis["gitplugin"]["git"]["status"], 
-            params={"workspace_path": workspace_path}
-        )
-        original_branch = git_status.get("branch", "main")
-        
-        # Pull code mới nhất trên nhánh hiện tại
+    branche = str(uuid.uuid4())
+    
+    # Get current status to keep the original branch
+    git_status = base_api(
+        apis["gitplugin"]["git"]["status"], 
+        params={"workspace_path": workspace_path}
+    )
+    original_branch = git_status.get("branch", "main")
+    
+    # Pull the latest code from the current branch
+    base_api(
+        apis["gitplugin"]["git"]["pull"], 
+        params={"workspace_path": workspace_path}
+    )
+    
+    # Create a new branch and switch to it
+    base_api(
+        apis["gitplugin"]["git"]["branch_create"], 
+        body={
+            "workspace_path": workspace_path, 
+            "branch_name": branche, 
+            "checkout": True
+        }
+    )
+    
+    # Create FixRequest from API model
+    fix_request = FixRequest(
+        user_id=user_uuid,
+        repo_name=current_repo_url, # type: ignore
+        path=workspace_path, # type: ignore
+        trace_error=request.trace_error,
+        priority=request.priority,
+        metadata=request.metadata or {}
+    )
+    
+    # Submit to queue
+    response = await queue_mgr.submit_task(fix_request)
+    pr = {}
+    if response.status == TaskStatus.COMPLETED:
+        # Commit modified files
         base_api(
-            apis["gitplugin"]["git"]["pull"], 
-            params={"workspace_path": workspace_path}
-        )
-        
-        # Khởi tạo cây mới và chuyển sang cây đó
-        base_api(
-            apis["gitplugin"]["git"]["branch_create"], 
-            body={
-                "workspace_path": workspace_path, 
-                "branch_name": branche, 
-                "checkout": True
-            }
-        )
-        
-        # Create FixRequest from API model
-        fix_request = FixRequest(
-            repo_name=repo,
-            path=workspace_path, # type: ignore
-            trace_error=request.trace_error,
-            priority=request.priority,
-            metadata=request.metadata or {}
-        )
-        
-        # Submit to queue
-        response = await queue_mgr.submit_task(fix_request)
-        print(response)
-        if response.status == TaskStatus.COMPLETED:
-            # Tiến hành commit các file đã sửa
-            base_api(
-                apis["gitplugin"]["git"]["commit"], 
-                body={
-                    "workspace_path": workspace_path,
-                    "message": "Automated fix applied",
-                    "files": ["*"] # Commit tất cả các thay đổi
-                }
-            )
-            base_api(
-                apis["gitplugin"]["git"]["push"], 
-                body={
-                    "workspace_path": workspace_path,
-                    "branch": branche
-                }
-            )
-            # Tạo Pull Request
-            base_api(
-                apis["gitplugin"]["git"]["pull_request"], 
-                body={
-                    "repo_url": request.repo_url,
-                    "credential_name": user_uuid,
-                    "source_branch": branche,
-                    "target_branch": original_branch,
-                    "title": f"Auto-fix for {repo}",
-                    "description": f"Automated fix for error:\n{trace_error}"
-                }
-            )
-
-        base_api(
-            apis["gitplugin"]["git"]["branch_switch"], 
+            apis["gitplugin"]["git"]["commit"], 
             body={
                 "workspace_path": workspace_path,
-                "branch_name": original_branch
+                "message": "Automated fix applied",
+                "files": ["*"] # Commit all changes
             }
         )
-        
-        # Convert to API model
-        return FixResponseModel(
-            request_id=response.request_id,
-            status=response.status.value,
-            message=response.message,
-            result=response.result,
-            error=response.error,
-            started_at=response.started_at.isoformat() if response.started_at else None,
-            completed_at=response.completed_at.isoformat() if response.completed_at else None,
-            execution_time_ms=response.execution_time_ms
+        base_api(
+            apis["gitplugin"]["git"]["push"], 
+            body={
+                "workspace_path": workspace_path,
+                "branch": branche
+            }
         )
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error submitting fix request: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Create pull request
+        pr = base_api(
+            apis["gitplugin"]["git"]["pull_request"], 
+            body={
+                "repo_url": current_repo_url,
+                "credential_name": user_uuid,
+                "source_branch": branche,
+                "target_branch": original_branch,
+                "title": f"Auto-fix for {current_repo_url}",
+                "description": f"Automated fix for error:\n{trace_error}"
+            }
+        )
+
+    base_api(
+        apis["gitplugin"]["git"]["branch_switch"], 
+        body={
+            "workspace_path": workspace_path,
+            "branch_name": original_branch
+        }
+    )
+    
+    payload = FixResponseModel(
+        request_id=response.request_id,
+        branche=branche,
+        pr_url=pr.get("pr_url", ""),
+        status=response.status.value,
+        message=response.message,
+        result=response.result,
+        error=response.error,
+        started_at=response.started_at.isoformat() if response.started_at else None,
+        completed_at=response.completed_at.isoformat() if response.completed_at else None,
+        execution_time_ms=response.execution_time_ms
+    )
+    return api_response(payload.model_dump())
 
 
-@app.get("/api/fix/{repo}/status/{request_id}", response_model=FixResponseModel, tags=["Fix"])
+@app.get("/api/fix/status/{request_id}", tags=["Fix"])
 async def get_fix_status(
-    repo: str,
     request_id: str,
-    queue_mgr: QueueManager = Depends(get_queue_manager)
-) -> FixResponseModel:
+    queue_mgr: QueueManager = Depends(get_queue_manager),
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Get status of a fix request
     
     Args:
-        repo: Repository name
         request_id: Request ID
         
     Returns:
@@ -444,7 +510,7 @@ async def get_fix_status(
     if response is None:
         raise HTTPException(status_code=404, detail="Request not found")
     
-    return FixResponseModel(
+    payload = FixResponseModel(
         request_id=response.request_id,
         status=response.status.value,
         message=response.message,
@@ -454,19 +520,18 @@ async def get_fix_status(
         completed_at=response.completed_at.isoformat() if response.completed_at else None,
         execution_time_ms=response.execution_time_ms
     )
+    return api_response(payload.model_dump())
 
-
-@app.delete("/api/fix/{repo}/cancel/{request_id}", tags=["Fix"])
+@app.delete("/api/fix/cancel/{request_id}", tags=["Fix"])
 async def cancel_fix_request(
-    repo: str,
     request_id: str,
-    queue_mgr: QueueManager = Depends(get_queue_manager)
+    queue_mgr: QueueManager = Depends(get_queue_manager),
+    user_uuid: str = Depends(get_current_user),
 ):
     """
     Cancel a pending fix request
     
     Args:
-        repo: Repository name
         request_id: Request ID to cancel
         
     Returns:
@@ -480,17 +545,18 @@ async def cancel_fix_request(
             detail="Cannot cancel request (not found or not pending)"
         )
     
-    return {"message": "Request cancelled successfully", "request_id": request_id}
+    return api_response({"message": "Request cancelled successfully", "request_id": request_id})
 
 
 @app.get("/api/queue/stats", tags=["Queue"])
 async def get_queue_stats(
-    queue_mgr: QueueManager = Depends(get_queue_manager)
-) -> Dict:
+    queue_mgr: QueueManager = Depends(get_queue_manager),
+    user_uuid: str = Depends(get_current_user),
+) -> Dict[str, Any]:
     """Get queue statistics"""
     stats = queue_mgr.get_queue_stats()
     
-    return {
+    return api_response({
         "total_tasks": stats.total_tasks,
         "pending_tasks": stats.pending_tasks,
         "processing_tasks": stats.processing_tasks,
@@ -498,14 +564,15 @@ async def get_queue_stats(
         "failed_tasks": stats.failed_tasks,
         "active_workers": stats.active_workers,
         "average_processing_time_ms": stats.average_processing_time_ms
-    }
+    })
 
 
 @app.get("/api/queue/tasks", tags=["Queue"])
 async def get_all_tasks(
     status: Optional[str] = None,
-    queue_mgr: QueueManager = Depends(get_queue_manager)
-) -> List[Dict]:
+    queue_mgr: QueueManager = Depends(get_queue_manager),
+    user_uuid: str = Depends(get_current_user),
+) -> Dict[str, Any]:
     """
     Get all tasks, optionally filtered by status
     
@@ -521,7 +588,7 @@ async def get_all_tasks(
     if status:
         try:
             status_enum = TaskStatus(status.lower())
-            tasks = [task for task in tasks if task.status == status_enum]
+            tasks = [task for task in tasks if task.status == status_enum and task.user_id == user_uuid]
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     
@@ -541,20 +608,19 @@ async def get_all_tasks(
             "progress": task.progress
         })
     
-    return result
+    return api_response(result)
 
 
-@app.get("/api/repos/{repo}/tasks", tags=["Repository"])
+@app.get("/api/repos/tasks", tags=["Repository"])
 async def get_repo_tasks(
-    repo: str,
     status: Optional[str] = None,
-    queue_mgr: QueueManager = Depends(get_queue_manager)
-) -> List[Dict]:
+    queue_mgr: QueueManager = Depends(get_queue_manager),
+    user_uuid: str = Depends(get_current_user),
+) -> Dict[str, Any]:
     """
     Get tasks for a specific repository
     
     Args:
-        repo: Repository name
         status: Optional status filter
         
     Returns:
@@ -562,8 +628,12 @@ async def get_repo_tasks(
     """
     all_tasks = queue_mgr.get_all_tasks()
     
-    # Filter by repo
-    repo_tasks = [task for task in all_tasks if task.repo_name == repo]
+    current_repo_url = get_repo_current(user_uuid)
+    if not current_repo_url:
+        raise HTTPException(status_code=400, detail="Current repo is not selected")
+
+    # Filter by current repo
+    repo_tasks = [task for task in all_tasks if task.repo_name == current_repo_url]
     
     # Filter by status if provided
     if status:
@@ -589,28 +659,7 @@ async def get_repo_tasks(
             "trace_error": task.trace_error[:200] + "..." if len(task.trace_error) > 200 else task.trace_error
         })
     
-    return result
-
-
-# Error handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    """Handle HTTP exceptions"""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail, "status_code": exc.status_code}
-    )
-
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    """Handle general exceptions"""
-    logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "status_code": 500}
-    )
-
+    return api_response(result)
 
 if __name__ == "__main__":
     import uvicorn
