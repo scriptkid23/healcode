@@ -370,6 +370,7 @@ class ErrorAnalysisWorkflow:
         return graph
     
     async def run_analysis(self, error_text: str, workspace_path: Optional[str] = None) -> Dict[str, Any]:
+        print(workspace_path)
         """
         Run the complete error analysis workflow
         
@@ -391,7 +392,8 @@ class ErrorAnalysisWorkflow:
         
         # Set workspace path if provided
         if workspace_path:
-            initial_state['config_snapshot']['workspace_path'] = workspace_path
+            initial_state["workspace_path"] = workspace_path
+            initial_state["config_snapshot"]["workspace_path"] = workspace_path
         
         try:
             # Execute the workflow
@@ -889,7 +891,7 @@ class ErrorAnalysisWorkflow:
                     
                     # Parse LLM response as JSON
                     try:
-                        print("llm_response: " + json.dumps(llm_response))
+                        print("llm_response: " + state["workspace_path"] + json.dumps(llm_response))
                         await self._editer_code(state["workspace_path"], llm_response) # type: ignore
                         impact_analysis:ImpactAnalysis = ImpactAnalysis.convert_llm_response_to_impact(llm_response) # type: ignore
 
@@ -1037,17 +1039,22 @@ class ErrorAnalysisWorkflow:
         return ordered
     
     async def _editer_code(self, workspace_path: str, llm_response: Dict[str, Any]):
+        print(workspace_path)
+        workspace_path = os.path.normpath(workspace_path)
+    
         file_fixes = llm_response.get("file_fixes", [])
         for file in file_fixes:
             try:
-                file_path = file.get("file_path")
-                if not file_path:
+                raw_file_path = file.get("file_path")
+                print(workspace_path, raw_file_path)
+                if not raw_file_path:
                     continue
+                normalized_file_path = os.path.normpath(raw_file_path).lstrip(os.sep)
 
-                if workspace_path in file_path:
-                    final_path = file_path
+                if normalized_file_path.startswith(workspace_path):
+                    final_path = normalized_file_path
                 else:
-                    final_path = os.path.join(workspace_path, file_path)
+                    final_path = os.path.join(workspace_path, normalized_file_path)
 
                 result_batch = await self.editer_manager.edit_lines( # type: ignore
                     file_path=final_path,

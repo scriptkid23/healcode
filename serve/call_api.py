@@ -1,6 +1,6 @@
+import asyncio
 import os
 import requests
-from typing import Any, Dict, Optional, Union
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -72,7 +72,15 @@ apis = {
     }
 }
 
-def base_api(api_config, body=None, params=None, path_params=None):
+async def base_api(
+    api_config,
+    body=None,
+    params=None,
+    path_params=None,
+    retries: int = 2,
+    retry_delay: float = 1.0,
+    timeout: float = 30.0,
+):
     """
     api_config: API object from the apis map (example: apis["gitplugin"]["git"]["pull"])
     body: Payload sent in request body (for POST/PUT)
@@ -88,22 +96,37 @@ def base_api(api_config, body=None, params=None, path_params=None):
     
     url = f"{BASE_URL}{endpoint}" # Replace with your actual service URL
 
-    try:
-        # 2. Call API using the configured method
-        response = requests.request(
-            method=method,
-            url=url,
-            json=body,   # Automatically sends JSON when body is not None
-            params=params
-        )
-        
-        response.raise_for_status()
-        response = response.json()
-        if (response.get("error", "")):
-            raise response.get("error")
+    for attempt in range(retries + 1):
+        try:
+            # 2. Call API using the configured method (thread offload for async routes)
+            response = await asyncio.to_thread(
+                requests.request,
+                method=method,
+                url=url,
+                json=body,   # Automatically sends JSON when body is not None
+                params=params,
+                timeout=timeout,
+            )
 
-        return response
-        
-    except Exception as e:
-        print(f"API Error: {e}")
-        raise e
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("error"):
+                raise RuntimeError(str(payload.get("error")))
+            return payload
+
+        except requests.RequestException as e:
+            status_code = None
+            if hasattr(e, "response") and e.response is not None:
+                status_code = e.response.status_code
+            retriable = (
+                isinstance(e, (requests.Timeout, requests.ConnectionError))
+                or (status_code is not None and status_code >= 500)
+            )
+            if retriable and attempt < retries:
+                await asyncio.sleep(retry_delay * (2 ** attempt))
+                continue
+            print(f"API Error: {e}")
+            raise
+        except Exception as e:
+            print(f"API Error: {e}")
+            raise

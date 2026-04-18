@@ -241,7 +241,7 @@ async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_cur
         "username": get_username_by_id(user_uuid), # type: ignore
         "password": "string"
     }
-    base_api(apis["gitplugin"]["credentials"]["create"], body=data)
+    await base_api(apis["gitplugin"]["credentials"]["create"], body=data)
     return api_response(user_uuid)
 
 @app.get("/api/credential/me", tags=["Credential"])
@@ -254,13 +254,13 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
     workspace_path = f"codebase/{user_uuid}/{repo_hash}"
     print(user_uuid)
     try:
-        base_api(
+        await base_api(
             apis["gitplugin"]["git"]["status"], 
             params={"workspace_path": workspace_path}
         )
 
         logger.info(f"Repository exists at {workspace_path}. Pulling changes...")
-        base_api(
+        await base_api(
             apis["gitplugin"]["git"]["pull"], 
             params={"workspace_path": workspace_path}
         )
@@ -272,7 +272,7 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
             "credential_name": user_uuid,
             "workspace_path": workspace_path
         }
-        base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
+        await base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
         create_repositorie(user_uuid, request.url, workspace_path)
 
     if request.branch:
@@ -281,7 +281,7 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
                 "workspace_path": workspace_path,
                 "branch_name": request.branch
             }
-            base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
+            await base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
             
         except Exception:
             raise BusinessLogicError(
@@ -328,7 +328,7 @@ async def switch_git_branch(
             message="No current repository selected. Call PUT /api/git/repo first."
         )
     try:
-        checkout = base_api(
+        checkout = await base_api(
             apis["gitplugin"]["git"]["branch_switch"],
             body={"workspace_path": workspace_path, "branch_name": body.branch}
         )
@@ -339,7 +339,7 @@ async def switch_git_branch(
             message=f"Branch '{body.branch}' does not exist or is not accessible."
         )
 
-    git_status = base_api(
+    git_status = await base_api(
         apis["gitplugin"]["git"]["status"],
         params={"workspace_path": workspace_path}
     )
@@ -366,7 +366,7 @@ async def git_where(
             message="No current repository selected. Call PUT /api/git/repo first."
         )
 
-    git_status = base_api(
+    git_status = await base_api(
         apis["gitplugin"]["git"]["status"],
         params={"workspace_path": workspace_path}
     )
@@ -394,6 +394,7 @@ async def submit_fix_request(
     """
     current_repo_url = get_repo_current(user_uuid)
     workspace_path = get_local_path_by_id(user_uuid)
+    print(workspace_path)
     if not workspace_path:
         raise HTTPException(status_code=400, detail="Current repo is invalid or workspace not found")
     if not current_repo_url:
@@ -402,20 +403,20 @@ async def submit_fix_request(
     branche = str(uuid.uuid4())
     
     # Get current status to keep the original branch
-    git_status = base_api(
+    git_status = await base_api(
         apis["gitplugin"]["git"]["status"], 
         params={"workspace_path": workspace_path}
     )
     original_branch = git_status.get("branch", "main")
     
     # Pull the latest code from the current branch
-    base_api(
+    await base_api(
         apis["gitplugin"]["git"]["pull"], 
         params={"workspace_path": workspace_path}
     )
     
     # Create a new branch and switch to it
-    base_api(
+    await base_api(
         apis["gitplugin"]["git"]["branch_create"], 
         body={
             "workspace_path": workspace_path, 
@@ -439,7 +440,7 @@ async def submit_fix_request(
     pr = {}
     if response.status == TaskStatus.COMPLETED:
         # Commit modified files
-        base_api(
+        await base_api(
             apis["gitplugin"]["git"]["commit"], 
             body={
                 "workspace_path": workspace_path,
@@ -447,7 +448,7 @@ async def submit_fix_request(
                 "files": ["*"] # Commit all changes
             }
         )
-        base_api(
+        await base_api(
             apis["gitplugin"]["git"]["push"], 
             body={
                 "workspace_path": workspace_path,
@@ -455,7 +456,7 @@ async def submit_fix_request(
             }
         )
         # Create pull request
-        pr = base_api(
+        pr = await base_api(
             apis["gitplugin"]["git"]["pull_request"], 
             body={
                 "repo_url": current_repo_url,
@@ -466,10 +467,9 @@ async def submit_fix_request(
                 "description": f"Automated fix for error:\n{trace_error}"
             }
         )
-    else:
-        branche = ""
 
-    base_api(
+    print(pr)
+    await base_api(
         apis["gitplugin"]["git"]["branch_switch"], 
         body={
             "workspace_path": workspace_path,
