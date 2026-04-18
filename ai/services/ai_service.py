@@ -165,6 +165,7 @@ Provide a detailed analysis with specific fixes and high confidence based on the
         try:
             # Collect enhanced context using the error context collector
             enhanced_context = await self.error_context_collector.collect_enhanced_context(error_input, workspace_path)
+            print(enhanced_context)
             
             # Log context loading information
             context_files_count = len(enhanced_context.usage_contexts) if enhanced_context.usage_contexts else 0
@@ -206,7 +207,7 @@ Provide a detailed analysis with specific fixes and high confidence based on the
         try:            
             # Read the file content            
             result = await self.chain.ainvoke(error_input + self.error_context_collector.format_json_return())
-            
+            print(result)
             return result
             
         except Exception as e:

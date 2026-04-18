@@ -188,6 +188,8 @@ class FixRequestModel(BaseModel):
 class FixResponseModel(BaseModel):
     """API model for fix responses"""
     request_id: str
+    branche: str
+    pr_url: str
     status: str
     message: str
     result: Optional[Dict] = None
@@ -434,7 +436,7 @@ async def submit_fix_request(
     
     # Submit to queue
     response = await queue_mgr.submit_task(fix_request)
-    print(response)
+    pr = {}
     if response.status == TaskStatus.COMPLETED:
         # Commit modified files
         base_api(
@@ -453,7 +455,7 @@ async def submit_fix_request(
             }
         )
         # Create pull request
-        base_api(
+        pr = base_api(
             apis["gitplugin"]["git"]["pull_request"], 
             body={
                 "repo_url": current_repo_url,
@@ -475,6 +477,8 @@ async def submit_fix_request(
     
     payload = FixResponseModel(
         request_id=response.request_id,
+        branche=branche,
+        pr_url=pr.get("pr_url", ""),
         status=response.status.value,
         message=response.message,
         result=response.result,
