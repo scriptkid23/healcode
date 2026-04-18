@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Default URL config, similar to BACKEND_URL in TS
-BASE_URL = os.getenv("BASE_URL") or "https://khoai-axiom-backend.vercel.app"
+BASE_URL = os.getenv("GIT_PLUGIN_URL")
 
 # API structure definitions
 apis = {
@@ -86,7 +86,7 @@ def base_api(api_config, body=None, params=None, path_params=None):
     if path_params:
         endpoint = endpoint.format(**path_params)
     
-    url = f"http://localhost:8000{endpoint}" # Replace with your actual service URL
+    url = f"{BASE_URL}{endpoint}" # Replace with your actual service URL
 
     try:
         # 2. Call API using the configured method
