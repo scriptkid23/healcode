@@ -98,7 +98,11 @@ def base_api(api_config, body=None, params=None, path_params=None):
         )
         
         response.raise_for_status()
-        return response.json()
+        response = response.json()
+        if (response.get("error", "")):
+            raise response.get("error")
+
+        return response
         
     except Exception as e:
         print(f"API Error: {e}")

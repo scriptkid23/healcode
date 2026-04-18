@@ -296,6 +296,10 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
     }
     return api_response(response)
 
+@app.get("/api/git/repo", tags=["Git"])
+async def list_repos(user_uuid: str = Depends(get_current_user)):
+    return api_response(get_repo_by_id(user_uuid))
+
 @app.get("/api/git/status", tags=["Git"])
 async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid: str = Depends(get_current_user)):
     """
@@ -349,11 +353,6 @@ async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid
         "repos": results,
         "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
     })
-
-@app.get("/api/git/list", tags=["Git"])
-async def list_repos(user_uuid: str = Depends(get_current_user)):
-    return api_response(get_repo_by_id(user_uuid))
-
 
 @app.put("/api/git/branche", tags=["Git"])
 async def switch_git_branch(

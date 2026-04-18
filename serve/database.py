@@ -156,3 +156,41 @@ def get_repo_by_id(user_id: str):
         # Log query errors and return None
         print(f"Error while fetching local_path: {e}")
         return None
+    
+def get_repo_current(user_id: str):
+    try:
+        response = (
+            supabase.table("users")
+            .select("current_repo_url")
+            .eq("id", user_id)
+            .execute()
+        )
+        if response.data:
+            return response.data[0].get("current_repo_url") # type: ignore
+            
+        # No matching record found
+        return None
+        
+    except Exception as e:
+        # Log query errors and return None
+        print(f"Error while fetching local_path: {e}")
+        return None
+
+def set_repo_current(user_id: str, repo: str):
+    try:
+        response = (
+            supabase.table("users")
+            .update({"current_repo_url": repo})
+            .eq("id", user_id)
+            .execute()
+        )
+        
+        if response.data:
+            print(f"Successfully updated current_repo_url to: {repo}")
+            return response.data[0]
+            
+        return None
+        
+    except Exception as e:
+        print(f"Error while setting current repo: {e}")
+        return None
