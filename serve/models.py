@@ -48,6 +48,8 @@ class FixResponse:
     request_id: str
     status: TaskStatus
     message: str = ""
+    pr_url: str = ""
+    branche: str = ""
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     started_at: Optional[datetime] = None

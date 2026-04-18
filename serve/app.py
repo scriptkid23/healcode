@@ -466,6 +466,8 @@ async def submit_fix_request(
                 "description": f"Automated fix for error:\n{trace_error}"
             }
         )
+    else:
+        branche = ""
 
     base_api(
         apis["gitplugin"]["git"]["branch_switch"], 
@@ -474,6 +476,7 @@ async def submit_fix_request(
             "branch_name": original_branch
         }
     )
+    queue_mgr.update_response(response.request_id, pr.get("pr_url", ""), branche)
     
     payload = FixResponseModel(
         request_id=response.request_id,
@@ -512,6 +515,8 @@ async def get_fix_status(
     
     payload = FixResponseModel(
         request_id=response.request_id,
+        branche=response.branche,
+        pr_url=response.pr_url,
         status=response.status.value,
         message=response.message,
         result=response.result,

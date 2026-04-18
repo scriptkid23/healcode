@@ -89,6 +89,10 @@ class QueueManager:
         """Add a task handler function"""
         self._task_handlers.append(handler)
     
+    def update_response(self, request_id: str, url: str, branche: str):
+        self._task_responses[request_id].pr_url = url
+        self._task_responses[request_id].branche = branche
+
     async def start(self):
         """Start the queue manager"""
         if self._running:

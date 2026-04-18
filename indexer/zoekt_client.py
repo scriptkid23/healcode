@@ -4,7 +4,7 @@ import base64
 from typing import Any, Dict, List, Optional
 
 class ZoektClient:
-    def __init__(self, endpoint: str = "http://127.0.0.1:6070/api/search"):
+    def __init__(self, endpoint: str = "http://0.0.0.0:6070/api/search"):
         self.endpoint = endpoint
 
     async def search_by_filename(self, filename: str, max_docs: int = 5) -> List[Dict[str, Any]]:
