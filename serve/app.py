@@ -15,7 +15,16 @@ from pydantic import BaseModel, Field
 from .models import BusinessLogicError, FixRequest, TaskStatus
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
-from .database import create_repositorie, fetchdata, get_local_path_by_id, get_or_create_user, get_repo_by_id, get_username_by_id
+from .database import (
+    create_repositorie,
+    fetchdata,
+    get_local_path_by_id,
+    get_or_create_user,
+    get_repo_by_id,
+    get_repo_current,
+    get_username_by_id,
+    set_repo_current,
+)
 from .call_api import base_api, apis
 import uuid
 
@@ -56,7 +65,6 @@ logger = logging.getLogger(__name__)
 # Global queue manager
 queue_manager: Optional[QueueManager] = None
 task_processor: Optional[TaskProcessor] = None
-current_git_context: Dict[str, Dict[str, str]] = {}
 
 # Define where you want to store the repos locally
 LOCAL_STORAGE_PATH = "./cloned_repos"
@@ -173,12 +181,10 @@ class GitRepoSelectionRequest(BaseModel):
 
 class GitBranchSwitchRequest(BaseModel):
     branch: str
-    git_url: Optional[str] = None
 
 
 class FixRequestModel(BaseModel):
     """API model for fix requests"""
-    repo_url: str = Field(..., description="Repository url")
     trace_error: str = Field(..., description="Error trace to fix")
     priority: int = Field(1, ge=1, le=5, description="Priority (1=highest, 5=lowest)")
     metadata: Optional[Dict] = Field(default_factory=dict, description="Additional metadata")
@@ -290,15 +296,27 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
         "message": f"Repository synchronized successfully and switched to branch {request.branch or 'default'}.",
         "local_path": workspace_path
     }
-    current_git_context[user_uuid] = {
-        "git_url": request.url,
-        "workspace_path": workspace_path
-    }
+    set_repo_current(user_uuid, request.url)
     return api_response(response)
 
 @app.get("/api/git/repo", tags=["Git"])
 async def list_repos(user_uuid: str = Depends(get_current_user)):
     return api_response(get_repo_by_id(user_uuid))
+
+
+@app.put("/api/git/repo", tags=["Git"])
+async def update_current_repos(
+    body: GitRepoSelectionRequest,
+    user_uuid: str = Depends(get_current_user)
+) -> Dict[str, Any]:
+    current_repo = set_repo_current(user_uuid, body.git_url)
+    if not current_repo:
+        raise BusinessLogicError(code=400, message="Unable to update current repository.")
+
+    return api_response(
+        data = body.git_url,
+        message="Current repository updated successfully"
+    )
 
 @app.get("/api/git/status", tags=["Git"])
 async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid: str = Depends(get_current_user)):
@@ -359,18 +377,14 @@ async def switch_git_branch(
     body: GitBranchSwitchRequest,
     user_uuid: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    selected_git_url = body.git_url
-    workspace_path = None
-
-    if selected_git_url:
-        workspace_path = get_local_path_by_id(user_uuid, selected_git_url)
-    else:
+    selected_git_url = get_repo_current(user_uuid)
+    workspace_path = get_local_path_by_id(user_uuid)
+    if not selected_git_url or not workspace_path:
         raise BusinessLogicError(
             code=400,
-            message=f"No repository selected. Call PUT /api/git/branche first or pass git_url"
+            message="No current repository selected. Call PUT /api/git/repo first."
         )
     try:
-        workspace_path = get_local_path_by_id(user_uuid, selected_git_url)
         checkout = base_api(
             apis["gitplugin"]["git"]["branch_switch"],
             body={"workspace_path": workspace_path, "branch_name": body.branch}
@@ -388,34 +402,25 @@ async def switch_git_branch(
     )
 
     return api_response(
-        {
-            "message": "Branch switched successfully",
+        data = {
             "git_url": selected_git_url,
             "branch": git_status.get("branch", body.branch)
-        }
+        },
+        message = "Branch switched successfully"
     )
 
 
 @app.get("/api/git/where", tags=["Git"])
 async def git_where(
-    git_url: Optional[str] = None,
     user_uuid: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    selected_git_url = git_url
-    workspace_path = None
-
-    if selected_git_url:
-        workspace_path = get_local_path_by_id(user_uuid, selected_git_url)
-    else:
-        user_context = current_git_context.get(user_uuid)
-        if user_context:
-            selected_git_url = user_context.get("git_url")
-            workspace_path = user_context.get("workspace_path")
+    selected_git_url = get_repo_current(user_uuid)
+    workspace_path = get_local_path_by_id(user_uuid)
 
     if not selected_git_url or not workspace_path:
         raise BusinessLogicError(
             code=400,
-            message=f"No repository selected. Call PUT /api/git/where first or pass git_url"
+            message="No current repository selected. Call PUT /api/git/repo first."
         )
 
     git_status = base_api(
@@ -432,9 +437,8 @@ async def git_where(
         }
     )
 
-@app.post("/api/fix/{repo}", tags=["Fix"])
+@app.post("/api/fix", tags=["Fix"])
 async def submit_fix_request(
-    repo: str,
     request: FixRequestModel,
     trace_error: str,
     queue_mgr: QueueManager = Depends(get_queue_manager),
@@ -445,9 +449,12 @@ async def submit_fix_request(
     """
     Submit a code fix request
     """
-    workspace_path = get_local_path_by_id(user_uuid, request.repo_url)
+    current_repo_url = get_repo_current(user_uuid)
+    workspace_path = get_local_path_by_id(user_uuid)
     if not workspace_path:
-        raise HTTPException(status_code=400, detail="User id Invalid or workspace not found")
+        raise HTTPException(status_code=400, detail="Current repo is invalid or workspace not found")
+    if not current_repo_url:
+        raise HTTPException(status_code=400, detail="Current repo is not selected")
 
     branche = str(uuid.uuid4())
     
@@ -476,7 +483,7 @@ async def submit_fix_request(
     
     # Create FixRequest from API model
     fix_request = FixRequest(
-        repo_name=repo,
+        repo_name=current_repo_url, # type: ignore
         path=workspace_path, # type: ignore
         trace_error=request.trace_error,
         priority=request.priority,
@@ -507,11 +514,11 @@ async def submit_fix_request(
         base_api(
             apis["gitplugin"]["git"]["pull_request"], 
             body={
-                "repo_url": request.repo_url,
+                "repo_url": current_repo_url,
                 "credential_name": user_uuid,
                 "source_branch": branche,
                 "target_branch": original_branch,
-                "title": f"Auto-fix for {repo}",
+                "title": f"Auto-fix for {current_repo_url}",
                 "description": f"Automated fix for error:\n{trace_error}"
             }
         )
@@ -537,9 +544,8 @@ async def submit_fix_request(
     return api_response(payload.model_dump())
 
 
-@app.get("/api/fix/{repo}/status/{request_id}", tags=["Fix"])
+@app.get("/api/fix/status/{request_id}", tags=["Fix"])
 async def get_fix_status(
-    repo: str,
     request_id: str,
     queue_mgr: QueueManager = Depends(get_queue_manager),
     user_uuid: str = Depends(get_current_user)
@@ -548,7 +554,6 @@ async def get_fix_status(
     Get status of a fix request
     
     Args:
-        repo: Repository name
         request_id: Request ID
         
     Returns:
@@ -572,9 +577,8 @@ async def get_fix_status(
     return api_response(payload.model_dump())
 
 
-@app.delete("/api/fix/{repo}/cancel/{request_id}", tags=["Fix"])
+@app.delete("/api/fix/cancel/{request_id}", tags=["Fix"])
 async def cancel_fix_request(
-    repo: str,
     request_id: str,
     queue_mgr: QueueManager = Depends(get_queue_manager),
     user_uuid: str = Depends(get_current_user),
@@ -583,7 +587,6 @@ async def cancel_fix_request(
     Cancel a pending fix request
     
     Args:
-        repo: Repository name
         request_id: Request ID to cancel
         
     Returns:
@@ -663,9 +666,8 @@ async def get_all_tasks(
     return api_response(result)
 
 
-@app.get("/api/repos/{repo}/tasks", tags=["Repository"])
+@app.get("/api/repos/tasks", tags=["Repository"])
 async def get_repo_tasks(
-    repo: str,
     status: Optional[str] = None,
     queue_mgr: QueueManager = Depends(get_queue_manager),
     user_uuid: str = Depends(get_current_user),
@@ -674,7 +676,6 @@ async def get_repo_tasks(
     Get tasks for a specific repository
     
     Args:
-        repo: Repository name
         status: Optional status filter
         
     Returns:
@@ -682,8 +683,12 @@ async def get_repo_tasks(
     """
     all_tasks = queue_mgr.get_all_tasks()
     
-    # Filter by repo
-    repo_tasks = [task for task in all_tasks if task.repo_name == repo]
+    current_repo_url = get_repo_current(user_uuid)
+    if not current_repo_url:
+        raise HTTPException(status_code=400, detail="Current repo is not selected")
+
+    # Filter by current repo
+    repo_tasks = [task for task in all_tasks if task.repo_name == current_repo_url]
     
     # Filter by status if provided
     if status:

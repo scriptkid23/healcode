@@ -88,14 +88,18 @@ def create_repositorie(user_id: str, git_url: str, local_path: str):
         print(f"Error while saving repository: {e}")
         return None
     
-def get_local_path_by_id(user_id: str, repo_url: str):
-    # Query the local_path field from repositories by user and repo
+def get_local_path_by_id(user_id: str):
+    # Resolve user's current repo first, then fetch local_path from repositories
     try:
+        current_repo_url = get_repo_current(user_id)
+        if not current_repo_url:
+            return None
+
         response = (
             supabase.table("repositories")
             .select("local_path")
             .eq("user_id", user_id)
-            .eq("git_url", repo_url)
+            .eq("git_url", current_repo_url)
             .execute()
         )
         print(response)
