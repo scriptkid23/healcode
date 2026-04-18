@@ -66,11 +66,6 @@ logger = logging.getLogger(__name__)
 queue_manager: Optional[QueueManager] = None
 task_processor: Optional[TaskProcessor] = None
 
-# Define where you want to store the repos locally
-LOCAL_STORAGE_PATH = "./cloned_repos"
-
-
-
 def api_response(data: Any = None, code: int = 200, status: bool = True, message: Optional[str] = None):
     response = {"status": status, "code": code, "data": data}
     if message is not None:
@@ -318,60 +313,6 @@ async def update_current_repos(
         message="Current repository updated successfully"
     )
 
-@app.get("/api/git/status", tags=["Git"])
-async def status(queue_mgr: QueueManager = Depends(get_queue_manager), user_uuid: str = Depends(get_current_user)):
-    """
-    Returns the status of repositories currently held in local storage (has bug, fixing, update).
-    """
-    # 1. Check if storage directory exists
-    if not os.path.exists(LOCAL_STORAGE_PATH):
-        return api_response({"repos": [], "storage_root": None})
-
-    # 2. Get list of physical folders (repositories)
-    repo_dirs = [d for d in os.listdir(LOCAL_STORAGE_PATH) 
-                 if os.path.isdir(os.path.join(LOCAL_STORAGE_PATH, d))]
-    
-    # 3. Get all tasks to cross-reference status
-    all_tasks = queue_mgr.get_all_tasks()
-    
-    # Helper to find the latest status for a specific repo
-    def get_repo_status(repo_name):
-        # Filter tasks for this repo
-        repo_tasks = [t for t in all_tasks if t.repo_name == repo_name]
-        
-        if not repo_tasks:
-            return "idle" # No tasks ever run for this repo
-            
-        # Get the most recent task
-        latest_task = sorted(repo_tasks, key=lambda x: x.created_at, reverse=True)[0]
-        
-        # Map TaskStatus to your requested terms
-        if latest_task.status.value == "processing":
-            return "fixing"
-        elif latest_task.status.value == "pending":
-            return "has bug" # It is in queue waiting to be fixed
-        elif latest_task.status.value == "completed":
-            return "update" # Fix completed, repo is updated
-        elif latest_task.status.value == "failed":
-            return "has bug" # Fix failed, likely still has bug
-        else:
-            return latest_task.status.value
-
-    # 4. Build the result list
-    results = []
-    for repo in repo_dirs:
-        results.append({
-            "name": repo,
-            "status": get_repo_status(repo),
-            "path": os.path.abspath(os.path.join(LOCAL_STORAGE_PATH, repo))
-        })
-
-    return api_response({
-        "count": len(results),
-        "repos": results,
-        "storage_root": os.path.abspath(LOCAL_STORAGE_PATH)
-    })
-
 @app.put("/api/git/branche", tags=["Git"])
 async def switch_git_branch(
     body: GitBranchSwitchRequest,
@@ -410,7 +351,7 @@ async def switch_git_branch(
     )
 
 
-@app.get("/api/git/where", tags=["Git"])
+@app.get("/api/git/status", tags=["Git"])
 async def git_where(
     user_uuid: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
@@ -483,6 +424,7 @@ async def submit_fix_request(
     
     # Create FixRequest from API model
     fix_request = FixRequest(
+        user_id=user_uuid,
         repo_name=current_repo_url, # type: ignore
         path=workspace_path, # type: ignore
         trace_error=request.trace_error,
@@ -576,7 +518,6 @@ async def get_fix_status(
     )
     return api_response(payload.model_dump())
 
-
 @app.delete("/api/fix/cancel/{request_id}", tags=["Fix"])
 async def cancel_fix_request(
     request_id: str,
@@ -643,7 +584,7 @@ async def get_all_tasks(
     if status:
         try:
             status_enum = TaskStatus(status.lower())
-            tasks = [task for task in tasks if task.status == status_enum]
+            tasks = [task for task in tasks if task.status == status_enum and task.user_id == user_uuid]
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     

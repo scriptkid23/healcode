@@ -127,7 +127,7 @@ class QueueManager:
         # Create initial processing response for the client
         response = FixResponse.processing(request.request_id)
         # 1. Run error analysis to get detailed insights
-        analysis_result = await self._error_analysis_workflow.run_analysis(
+        analysis_result = await self._error_analysis_workflow.run_analysis( # type: ignore
             request.trace_error, 
             request.path
         )
@@ -145,6 +145,7 @@ class QueueManager:
 
         # 3. Initialize TaskInfo with enriched metadata
         task_info = TaskInfo(
+            user_id=request.user_id,
             request_id=request.request_id,
             repo_name=request.repo_name,
             trace_error=request.trace_error,

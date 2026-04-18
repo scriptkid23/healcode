@@ -23,6 +23,7 @@ class TaskStatus(Enum):
 @dataclass
 class FixRequest:
     """Request model for code fix operations"""
+    user_id: str
     repo_name: str
     trace_error: str
     path: str
@@ -100,6 +101,7 @@ class FixResponse:
 @dataclass
 class TaskInfo:
     """Information about a queued task"""
+    user_id: str
     request_id: str
     repo_name: str
     trace_error: str
