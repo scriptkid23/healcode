@@ -21,6 +21,7 @@ from .database import (
     get_local_path_by_id,
     get_or_create_user,
     get_repo_by_id,
+    get_repo_by_id_and_url,
     get_repo_current,
     get_username_by_id,
     set_repo_current,
@@ -286,51 +287,67 @@ async def profile(user_uuid: str = Depends(get_current_user)):
 
 @app.post("/api/git/repo", tags=["Git"])
 async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
-    repo_hash = hashlib.md5(request.url.encode()).hexdigest()
-    workspace_path = f"codebase/{user_uuid}/{repo_hash}"
+    # 1. Chuan hoa URL de tranh trung lap (bo .git va khoang trang)
     url = request.url.removesuffix(".git")
+    
+    # 2. Kiem tra xem DB da luu repo nay cho user nay chua
+    # Gia su ban co ham get_repo_by_url trong database.py
+    existing_repo = get_repo_by_id_and_url(user_uuid, url)
+
+    if existing_repo:
+        # Neu da ton tai trong DB, lay luon path cu
+        workspace_path = existing_repo['local_path']
+        logger.info(f"Repo found in DB: {url}")
+    else:
+        # Neu chua co, moi tao hash va path moi
+        repo_hash = hashlib.md5(url.encode()).hexdigest()
+        workspace_path = f"codebase/{user_uuid}/{repo_hash}"
+    
     try:
+        # 3. Kiem tra trang thai vat ly cua repo[cite: 5]
         await base_api(
             apis["gitplugin"]["git"]["status"], 
             params={"workspace_path": workspace_path}
         )
-
-        logger.info(f"Repository exists at {workspace_path}. Pulling changes...")
+        
+        logger.info(f"Repository physical files exist. Pulling changes...")
         await base_api(
             apis["gitplugin"]["git"]["pull"], 
             params={"workspace_path": workspace_path}
         )
     
-    except:
-        logger.info(f"Repository not found. Setting up new repo from {url}...")
+    except Exception:
+        # 4. Neu khong thay file vat ly, tien hanh setup moi
+        logger.info(f"Physical files not found. Setting up at {workspace_path}...")
         setup_data = {
             "repo_url": url,
             "credential_name": user_uuid,
             "workspace_path": workspace_path
         }
         await base_api(apis["gitplugin"]["git"]["setup"], body=setup_data)
-        create_repositorie(user_uuid, request.url, workspace_path)
+        
+        # 5. Chi luu vao DB neu truoc do chua co ban ghi
+        if not existing_repo:
+            create_repositorie(user_uuid, url, workspace_path) #[cite: 4]
 
+    # 6. Thuc hien switch branch neu co yeu cau
     if request.branch:
         try:
-            switch_data = {
-                "workspace_path": workspace_path,
-                "branch_name": request.branch
-            }
-            await base_api(apis["gitplugin"]["git"]["branch_switch"], body=switch_data)
-            
+            await base_api(
+                apis["gitplugin"]["git"]["branch_switch"], 
+                body={"workspace_path": workspace_path, "branch_name": request.branch}
+            )
         except Exception:
             raise BusinessLogicError(
                 code=404, 
-                message=f"Branch '{request.branch}' does not exist or is not accessible."
+                message=f"Branch '{request.branch}' does not exist."
             )
 
-    response = {
-        "message": f"Repository synchronized successfully and switched to branch {request.branch or 'default'}.",
+    set_repo_current(user_uuid, url) # Luu trang thai repo dang lam viec[cite: 4]
+    return api_response({
+        "message": "Repository synchronized successfully.",
         "local_path": workspace_path
-    }
-    set_repo_current(user_uuid, url)
-    return api_response(response)
+    })
 
 @app.get("/api/git/repo", tags=["Git"])
 async def list_repos(user_uuid: str = Depends(get_current_user)):

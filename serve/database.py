@@ -198,3 +198,25 @@ def set_repo_current(user_id: str, repo: str):
     except Exception as e:
         print(f"Error while setting current repo: {e}")
         return None
+
+def get_repo_by_id_and_url(user_id: str, repo_url: str):
+    try:
+        response = (
+            supabase.table("repositories")
+            .select("git_url", "local_path")
+            .eq("user_id", user_id)
+            .eq("git_url", repo_url)
+            .execute()
+        )
+        
+        # Return local_path when a matching record exists
+        if response.data:
+            return dict(response.data[0])
+            
+        # No matching record found
+        return None
+        
+    except Exception as e:
+        # Log query errors and return None
+        print(f"Error while fetching local_path: {e}")
+        return None
