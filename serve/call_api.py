@@ -6,12 +6,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Default URL config, similar to BACKEND_URL in TS
-BASE_URL = os.getenv("GIT_PLUGIN_URL")
+BASE_URL = os.getenv("GIT_PLUGIN_URL", "http://0.0.0.0:8000")  # Replace with your actual service URL
 
 # API structure definitions
 apis = {
     "gitplugin": {
         "credentials": {
+            "list": {
+                "method": "GET",
+                "endpoint": "/credentials"
+            },
             "create": {
                 "method": "POST",
                 "endpoint": "/credentials",

@@ -40,7 +40,7 @@ class AIService:
                  tenant_id: str, 
                  redis_url: str, 
                  model_configs: Dict[str, Dict[str, Any]], 
-                 zoekt_endpoint: str = "http://127.0.0.1:6070/api/search",
+                 zoekt_endpoint: str = "http://0.0.0.0:6070/api/search",
                  primary_model: str = "google_gemini",
                  max_context_files: int = 10):
         

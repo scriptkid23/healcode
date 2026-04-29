@@ -232,8 +232,43 @@ async def credential (
     }
     return api_response(response)
 
+@app.get("/api/credential/token", tags=['Credential'])
+async def get_credential_token(user_uuid: str = Depends(get_current_user)):
+    # Goi API lay credentials (tra ve dang hash map / dict)
+    credentials = await base_api(apis["gitplugin"]["credentials"]["list"])
+    print(credentials)
+    
+    user_token = None
+    if isinstance(credentials, dict):
+        # Truong hop 1: Key cua hash map chinh la name (user_uuid)
+        if user_uuid in credentials:
+            user_token = credentials[user_uuid]
+        else:
+            # Truong hop 2: Key la id ngau nhien, nam trong value
+            for value in credentials.values():
+                if isinstance(value, dict) and value.get("name") == user_uuid:
+                    user_token = value
+                    break
+                    
+    if not user_token:
+        raise BusinessLogicError(code=404, message="Khong tim thay token cho nguoi dung nay")
+        
+    return api_response(user_token)
+
+
 @app.post("/api/credential/token", tags=['Credential'])
 async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_current_user)):
+    # 1. Goi api xoa credential hien tai truoc (truyen path_params)
+    try:
+        await base_api(
+            apis["gitplugin"]["credentials"]["delete"], 
+            path_params={"name": user_uuid}
+        )
+    except Exception:
+        # Neu tai khoan chua tung tao token, api xoa co the tra ve loi -> Bo qua
+        pass
+
+    # 2. Tao credential moi
     data = {
         "name": user_uuid, # type: ignore
         "type": "token",
@@ -241,6 +276,7 @@ async def credential_token(body: TokenResquest, user_uuid: str = Depends(get_cur
         "username": get_username_by_id(user_uuid), # type: ignore
         "password": "string"
     }
+    
     await base_api(apis["gitplugin"]["credentials"]["create"], body=data)
     return api_response(user_uuid)
 

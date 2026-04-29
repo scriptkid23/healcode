@@ -15,7 +15,7 @@ async def main():
     # Configuration
     tenant_id = "demo_tenant"
     redis_url = "redis://localhost:6379"
-    zoekt_endpoint = "http://127.0.0.1:6070/api/search"
+    zoekt_endpoint = "http://0.0.0.0:6070/api/search"
     
     # Model configuration (you need to provide your API keys)
     model_configs = {

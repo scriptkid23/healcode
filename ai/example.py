@@ -35,7 +35,7 @@ async def main():
         tenant_id="tenant1",
         redis_url="redis://localhost:6380",
         model_configs=model_configs,
-        zoekt_endpoint="http://127.0.0.1:6070/api/search",
+        zoekt_endpoint="http://0.0.0.0:6070/api/search",
         primary_model="google_gemini",
         max_context_files=10
     )
