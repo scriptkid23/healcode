@@ -288,7 +288,7 @@ async def profile(user_uuid: str = Depends(get_current_user)):
 async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user)):
     repo_hash = hashlib.md5(request.url.encode()).hexdigest()
     workspace_path = f"codebase/{user_uuid}/{repo_hash}"
-    print(user_uuid)
+    url = request.url.removesuffix(".git")
     try:
         await base_api(
             apis["gitplugin"]["git"]["status"], 
@@ -302,9 +302,9 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
         )
     
     except:
-        logger.info(f"Repository not found. Setting up new repo from {request.url}...")
+        logger.info(f"Repository not found. Setting up new repo from {url}...")
         setup_data = {
-            "repo_url": request.url,
+            "repo_url": url,
             "credential_name": user_uuid,
             "workspace_path": workspace_path
         }
@@ -329,7 +329,7 @@ async def repo(request: RepoRequest, user_uuid: str = Depends(get_current_user))
         "message": f"Repository synchronized successfully and switched to branch {request.branch or 'default'}.",
         "local_path": workspace_path
     }
-    set_repo_current(user_uuid, request.url)
+    set_repo_current(user_uuid, url)
     return api_response(response)
 
 @app.get("/api/git/repo", tags=["Git"])
@@ -342,12 +342,12 @@ async def update_current_repos(
     body: GitRepoSelectionRequest,
     user_uuid: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    current_repo = set_repo_current(user_uuid, body.git_url)
+    current_repo = set_repo_current(user_uuid, body.git_url.removesuffix(".git"))
     if not current_repo:
         raise BusinessLogicError(code=400, message="Unable to update current repository.")
 
     return api_response(
-        data = body.git_url,
+        data = body.git_url.removesuffix(".git"),
         message="Current repository updated successfully"
     )
 
@@ -382,7 +382,7 @@ async def switch_git_branch(
 
     return api_response(
         data = {
-            "git_url": selected_git_url,
+            "git_url": selected_git_url.removesuffix(".git"),
             "branch": git_status.get("branch", body.branch)
         },
         message = "Branch switched successfully"
@@ -409,7 +409,7 @@ async def git_where(
 
     return api_response(
         {
-            "git_url": selected_git_url,
+            "git_url": selected_git_url.removesuffix(".git"),
             "branch": git_status.get("branch", "unknown"),
             "commit": git_status.get("commit", "No commited"),
             "message": git_status.get("commit_message", "No message"),
