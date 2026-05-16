@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from serve.secure_executor import SecureExecutor
+
 from .models import BusinessLogicError, FixRequest, TaskStatus
 from .queue_manager import QueueManager
 from .task_processor import TaskProcessor
@@ -39,6 +41,8 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 518400
 
 security = HTTPBearer()
+
+executor = SecureExecutor()
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -436,12 +440,10 @@ async def git_where(
 @app.post("/api/fix", tags=["Fix"])
 async def submit_fix_request(
     request: FixRequestModel,
-    trace_error: str,
     queue_mgr: QueueManager = Depends(get_queue_manager),
     user_uuid: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    if request: 
-        request.trace_error = trace_error
+    
     """
     Submit a code fix request
     """
@@ -449,9 +451,9 @@ async def submit_fix_request(
     workspace_path = get_local_path_by_id(user_uuid)
     print(workspace_path)
     if not workspace_path:
-        raise HTTPException(status_code=400, detail="Current repo is invalid or workspace not found")
+        raise BusinessLogicError(code=400, message="Current repo is invalid or workspace not found")
     if not current_repo_url:
-        raise HTTPException(status_code=400, detail="Current repo is not selected")
+        raise BusinessLogicError(code=400, message="Current repo is not selected")
 
     branche = str(uuid.uuid4())
     
@@ -462,11 +464,32 @@ async def submit_fix_request(
     )
     original_branch = git_status.get("branch", "main")
     
+    
     # Pull the latest code from the current branch
     await base_api(
         apis["gitplugin"]["git"]["pull"], 
         params={"workspace_path": workspace_path}
     )
+
+    if request.trace_error == "":
+        result = await executor.execute_from_root(workspace_path)
+        print(result)
+
+        # Su dung get de truy xuat dict an toan va cung cap gia tri mac dinh neu key khong ton tai
+        logs = result.get("logs", "")
+        success = result.get("success", False)
+        error_msg = result.get("error", "Unknown error occurred")
+
+        if logs == "" and success:
+            return api_response({
+                "message": "don't error"
+            })
+        elif success:
+            # Neu co loi (khong success), ban ra thong bao loi
+            raise BusinessLogicError(code=400, message=error_msg)
+        else:
+            # Can nhac ky lai viec gan stdout vao bien luu tru loi nay
+            request.trace_error = logs
     
     # Create a new branch and switch to it
     await base_api(
@@ -477,6 +500,7 @@ async def submit_fix_request(
             "checkout": True
         }
     )
+
     
     # Create FixRequest from API model
     fix_request = FixRequest(
@@ -517,7 +541,7 @@ async def submit_fix_request(
                 "source_branch": branche,
                 "target_branch": original_branch,
                 "title": f"Auto-fix for {current_repo_url}",
-                "description": f"Automated fix for error:\n{trace_error}"
+                "description": f"Automated fix for error:\n{request.trace_error}"
             }
         )
 
@@ -564,7 +588,7 @@ async def get_fix_status(
     response = queue_mgr.get_task_status(request_id)
     
     if response is None:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise BusinessLogicError(code=404, message="Request not found")
     
     payload = FixResponseModel(
         request_id=response.request_id,
@@ -598,9 +622,9 @@ async def cancel_fix_request(
     success = queue_mgr.cancel_task(request_id)
     
     if not success:
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot cancel request (not found or not pending)"
+        raise BusinessLogicError(
+            code=400, 
+            message="Cannot cancel request (not found or not pending)"
         )
     
     return api_response({"message": "Request cancelled successfully", "request_id": request_id})
@@ -648,7 +672,7 @@ async def get_all_tasks(
             status_enum = TaskStatus(status.lower())
             tasks = [task for task in tasks if task.status == status_enum and task.user_id == user_uuid]
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            raise BusinessLogicError(code=400, message=f"Invalid status: {status}")
     
     # Convert to dict for JSON response
     result = []
@@ -688,7 +712,7 @@ async def get_repo_tasks(
     
     current_repo_url = get_repo_current(user_uuid)
     if not current_repo_url:
-        raise HTTPException(status_code=400, detail="Current repo is not selected")
+        raise BusinessLogicError(code=400, message="Current repo is not selected")
 
     # Filter by current repo
     repo_tasks = [task for task in all_tasks if task.repo_name == current_repo_url]
@@ -699,7 +723,7 @@ async def get_repo_tasks(
             status_enum = TaskStatus(status.lower())
             repo_tasks = [task for task in repo_tasks if task.status == status_enum]
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            raise BusinessLogicError(code=400, message=f"Invalid status: {status}")
     
     # Convert to dict for JSON response
     result = []
