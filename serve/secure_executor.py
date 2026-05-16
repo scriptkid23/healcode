@@ -12,14 +12,12 @@ class SecureExecutor:
     def _execute_sync(self, project_dir: str, timeout_seconds: int) -> Dict[str, Any]:
         container = None
         try:
-            # 1. Build image truc tiep tu thu muc goc cua project
             image, build_log = self.client.images.build(
                 path=project_dir,
                 rm=True,
                 forcerm=True
             )
             
-            # 2. Chay container tu image vua build voi cac gioi han bao mat
             container = self.client.containers.run(
                 image.id,
                 detach=True,
@@ -28,7 +26,6 @@ class SecureExecutor:
                 network_disabled=True
             )
 
-            # 3. Co che timeout de ngat tien trinh treo
             start_time = time.time()
             while container.status in ['created', 'running']:
                 container.reload()
@@ -42,7 +39,6 @@ class SecureExecutor:
                     }
                 time.sleep(0.5)
 
-            # 4. Thu thap logs khi tien trinh ket thuc tu nhien
             result = container.wait()
             logs = container.logs().decode('utf-8')
             
@@ -56,7 +52,6 @@ class SecureExecutor:
             }
 
         except docker.errors.BuildError as e:
-            # Bat loi cu phap hoac loi moi truong xay ra ngay trong qua trinh build
             error_logs = "".join([chunk.get('stream', '') for chunk in e.build_log if 'stream' in chunk])
             return {
                 "success": False,
@@ -82,8 +77,3 @@ class SecureExecutor:
             project_dir, 
             timeout_seconds
         )
-
-# Cach su dung
-# executor = DirectDockerExecutor()
-# result = executor.execute_from_root('/path/to/project_dir')
-# print(result['logs'])
