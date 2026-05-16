@@ -471,18 +471,25 @@ async def submit_fix_request(
         params={"workspace_path": workspace_path}
     )
 
-    if (request.trace_error == ""):
+    if request.trace_error == "":
         result = await executor.execute_from_root(workspace_path)
         print(result)
 
-        if (result.logs == ""):
+        # Su dung get de truy xuat dict an toan va cung cap gia tri mac dinh neu key khong ton tai
+        logs = result.get("logs", "")
+        success = result.get("success", False)
+        error_msg = result.get("error", "Unknown error occurred")
+
+        if logs == "" and success:
             return api_response({
                 "message": "don't error"
             })
-        elif (result.success):
-            request.trace_error = result.logs
+        elif success:
+            # Neu co loi (khong success), ban ra thong bao loi
+            raise BusinessLogicError(code=400, message=error_msg)
         else:
-            raise BusinessLogicError(code=400, message=result.error)
+            # Can nhac ky lai viec gan stdout vao bien luu tru loi nay
+            request.trace_error = logs
     
     # Create a new branch and switch to it
     await base_api(
@@ -534,7 +541,7 @@ async def submit_fix_request(
                 "source_branch": branche,
                 "target_branch": original_branch,
                 "title": f"Auto-fix for {current_repo_url}",
-                "description": f"Automated fix for error:\n{trace_error}"
+                "description": f"Automated fix for error:\n{request.trace_error}"
             }
         )
 
