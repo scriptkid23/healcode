@@ -513,7 +513,7 @@ async def submit_fix_request(
     )
     
     # Submit to queue
-    response = await queue_mgr.submit_task(fix_request)
+    response = await queue_mgr.process_task_loop(fix_request)
     pr = {}
     if response.status == TaskStatus.COMPLETED:
         # Commit modified files

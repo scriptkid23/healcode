@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import logging
 
+from serve.secure_executor import SecureExecutor
+
 from .models import FixRequest, FixResponse, TaskInfo, TaskStatus, QueueStats, WorkerInfo
 from .ai import getErrorAnalysisWorkflow
 
@@ -81,6 +83,9 @@ class QueueManager:
         # Statistics
         self._stats = QueueStats()
         self._lock = threading.Lock()
+
+
+        self.executor = SecureExecutor()
         
         # Callbacks
         self._task_handlers: List[Callable[[TaskInfo], Any]] = []
@@ -119,69 +124,63 @@ class QueueManager:
         self._worker_executor.shutdown(wait=True)
         logger.info("Queue manager stopped")
     
-    async def submit_task(self, request: FixRequest) -> FixResponse:
-        """Submit a new task to the queue"""
-        # Check queue capacity limit
-        if self._pending_queue.size() >= self.max_queue_size:
+    async def process_task_loop(self, task_info: TaskInfo, workspace_path: str):
+        MAX_RETRIES = 3
+        current_attempt = 0
+        is_success = False
+        
+        # 1. Gan loi ban dau (da co san tu request) vao bien chay
+        current_trace_error = task_info.trace_error
+        
+        # Mang luu vet toan bo lich su (dua loi ban dau vao luon)
+        execution_history = [{
+            "attempt": 0,
+            "action": "Initial Error Received",
+            "logs": current_trace_error
+        }]
+        
+        final_analysis = {}
+
+        while current_attempt < MAX_RETRIES:
+            current_attempt += 1
+            print(f"--- Vong lap thu {current_attempt}: AI bat dau sua code ---")
+
+            analysis_result = await self._error_analysis_workflow.run_analysis(
+                current_trace_error, 
+                workspace_path
+            )
+            final_analysis = analysis_result
+            
+            docker_result = await self.executor.execute_from_root(workspace_path)
+            
+            execution_history.append({
+                "attempt": current_attempt,
+                "success": docker_result.get("success", False),
+                "logs": docker_result.get("logs", "")
+            })
+
+            if docker_result.get("success"):
+                is_success = True
+                break
+            else:
+                current_trace_error = docker_result.get("logs", "")
+                
+        task_info.metadata["execution_history"] = execution_history
+        task_info.metadata["total_attempts"] = current_attempt
+        
+        if is_success:
+            return FixResponse.completed(
+                request_id=task_info.request_id,
+                result=final_analysis.get('impact_analysis', {}),
+                execution_time_ms=final_analysis.get('metrics', {}).get('total_execution_time_ms', 0),
+                message=f"Fixed successfully after {current_attempt} attempts",
+            )
+        else:
             return FixResponse.failed(
-                request.request_id,
-                "Queue is full. Please try again later."
+                request_id=task_info.request_id,
+                error=f"Failed to fix after {MAX_RETRIES} attempts. See execution_history for all trace errors."
             )
         
-        # Create initial processing response for the client
-        response = FixResponse.processing(request.request_id)
-        # 1. Run error analysis to get detailed insights
-        analysis_result = await self._error_analysis_workflow.run_analysis( # type: ignore
-            request.trace_error, 
-            request.path
-        )
-        
-        # 2. Extract key fields from analysis output and enrich metadata
-        updated_metadata = {
-            **request.metadata,
-            "analysis_id": analysis_result.get("workflow_id"),
-            "parsed_errors": analysis_result.get("error_info", {}).get("parsed_errors", []),
-            "affected_functions": analysis_result.get("affected_functions", []),
-            "risk_level": analysis_result.get("impact_analysis", {}).get("risk_level"),
-            "fix_suggestions": analysis_result.get("impact_analysis", {}).get("fix_suggestions", []),
-            "metrics": analysis_result.get("metrics", {})
-        }
-
-        # 3. Initialize TaskInfo with enriched metadata
-        task_info = TaskInfo(
-            user_id=request.user_id,
-            request_id=request.request_id,
-            repo_name=request.repo_name,
-            trace_error=request.trace_error,
-            status=TaskStatus.PENDING,
-            created_at=request.created_at,
-            priority=request.priority,
-            metadata=updated_metadata
-        )
-        
-        # 4. Escalate priority to highest when risk level is high
-        if updated_metadata.get("risk_level") == "high":
-            task_info.priority = 1
-        
-        # Store task and update queue statistics
-        with self._lock:
-            self._tasks[request.request_id] = task_info
-            self._stats.total_tasks += 1
-            self._stats.pending_tasks += 1
-        
-        # Push task into priority queue
-        self._pending_queue.put(task_info)
-        
-        
-        self._task_responses[request.request_id] = response
-        
-        logger.info(
-            f"Task {request.request_id} submitted. "
-            f"Analysis ID: {updated_metadata['analysis_id']}, Risk: {updated_metadata['risk_level']}"
-        )
-        response = FixResponse.completed(request.request_id, analysis_result['impact_analysis'], analysis_result['metrics']['total_execution_time_ms'])
-        return response
-    
     def get_task_status(self, request_id: str) -> Optional[FixResponse]:
         """Get status of a specific task"""
         return self._task_responses.get(request_id)
